@@ -44,7 +44,7 @@ export class FirstAdminService {
       throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, 'VALIDATION_FAILED', 'Enter a valid email address.', [{ field: 'email', message: 'Not a valid email' }]);
     }
     if (input.password !== undefined) {
-      const problem = passwordProblem(input.password, [email, ...input.fullName.split(' ')]);
+      const problem = passwordProblem(input.password, via === 'script' ? [] : [email, ...input.fullName.split(' ')]);
       if (problem) throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, 'VALIDATION_FAILED', problem, [{ field: 'password', message: problem }]);
     }
     let org = await this.orgs.findOne().lean<any>();
