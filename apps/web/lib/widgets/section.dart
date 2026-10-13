@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:n_ui/n_ui.dart';
@@ -5,6 +7,7 @@ import 'package:n_ui/n_ui.dart';
 import '../app/services.dart';
 import '../app/session.dart';
 import '../shell/app_shell.dart';
+
 
 /// One sub-page of a section (e.g. Time → Leave). Hidden when [visible] says so.
 class SectionTab {
@@ -59,19 +62,76 @@ class SectionPage extends StatelessWidget {
   }
 }
 
-/// Grid of cards that collapses to one column on phones.
+/// Responsive grid of cards that neatly distributes items across balanced columns.
+/// Unlike a raw Wrap, this multi-column layout ensures:
+/// 1. Shorter cards don't leave empty vertical gaps under them.
+/// 2. Rows with fewer items expand evenly across the available width without leaving empty holes on the right.
+/// 3. Collapses seamlessly to a single column on mobile devices.
 class CardGrid extends StatelessWidget {
-  const CardGrid({super.key, required this.children, this.minTileWidth = 320});
+  const CardGrid({
+    super.key,
+    required this.children,
+    this.minTileWidth = 360,
+    this.maxCols = 3,
+    this.spacing,
+  });
+
   final List<Widget> children;
   final double minTileWidth;
+  final int maxCols;
+  final double? spacing;
 
   @override
   Widget build(BuildContext context) {
     final t = NTokens.of(context);
+    final gap = spacing ?? t.gap;
+
+    if (children.isEmpty) return const SizedBox.shrink();
+
     return LayoutBuilder(builder: (context, c) {
-      final cols = (c.maxWidth / minTileWidth).floor().clamp(1, 4);
-      final w = (c.maxWidth - (cols - 1) * t.gap) / cols;
-      return Wrap(spacing: t.gap, runSpacing: t.gap, children: [for (final ch in children) SizedBox(width: w, child: ch)]);
+      // Allow up to 4 columns on ultra-wide screens (e.g. >= 1680px) if maxCols allows it
+      final effectiveMaxCols = c.maxWidth >= 1680 ? math.min<int>(maxCols + 1, 4) : maxCols;
+      final rawCols = (c.maxWidth / minTileWidth).floor();
+      // Crucial: clamp cols to children.length so 2 or 3 items never leave blank columns on the right!
+      final int cols = rawCols.clamp(1, math.min<int>(effectiveMaxCols, children.length));
+
+      if (cols <= 1) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0) SizedBox(height: gap),
+              children[i],
+            ],
+          ],
+        );
+      }
+
+      // Distribute children across columns in round-robin order
+      final columns = List.generate(cols, (_) => <Widget>[]);
+      for (var i = 0; i < children.length; i++) {
+        columns[i % cols].add(children[i]);
+      }
+
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var col = 0; col < cols; col++) ...[
+            if (col > 0) SizedBox(width: gap),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var i = 0; i < columns[col].length; i++) ...[
+                    if (i > 0) SizedBox(height: gap),
+                    columns[col][i],
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      );
     });
   }
 }

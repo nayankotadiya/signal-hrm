@@ -49,6 +49,9 @@ export class FirstAdminService {
     }
     let org = await this.orgs.findOne().lean<any>();
     if (!org) org = (await this.orgs.create({ name: input.organization.trim() })).toObject();
+    if (input.password) {
+      await this.orgs.updateOne({ _id: org._id }, { $set: { 'settings.security.passwordLogin': true } });
+    }
     await this.provisioning.provision(org._id);
 
     const name = input.fullName.trim();

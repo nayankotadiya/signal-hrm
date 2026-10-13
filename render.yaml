@@ -45,6 +45,20 @@ services:
         generateValue: true
       - key: OTP_DEV_ECHO
         value: "false"
+      - key: PASSWORD_LOGIN
+        value: "true"
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_SECURE
+        sync: false
+      - key: MAIL_FROM
+        sync: false
       - key: STORAGE_PROVIDER
         value: "google_drive"
       - key: GOOGLE_DRIVE_CREDENTIALS_JSON

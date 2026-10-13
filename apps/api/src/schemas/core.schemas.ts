@@ -54,7 +54,7 @@ export const OrganizationSchema = new Schema(
         reauthMinutes: { type: Number, default: 10 },
         maxFailedLogins: { type: Number, default: 5 },
         lockMinutes: { type: Number, default: 15 },
-        passwordLogin: { type: Boolean, default: false },
+        passwordLogin: { type: Boolean, default: true },
       },
       approvals: { preventSelfApproval: { type: Boolean, default: true }, escalationHours: { type: Number, default: 48 } },
       notifications: { essentialEvents: { type: [String], default: ['security_alert', 'backup_failure', 'system_incident'] } },

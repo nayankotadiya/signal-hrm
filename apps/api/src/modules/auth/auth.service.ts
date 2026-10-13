@@ -123,11 +123,16 @@ export class AuthService {
       ip,
     });
     const minutes = Math.round(this.env.OTP_TTL_SECONDS / 60);
-    await this.mail.send({
-      to: value,
-      subject: `${code} is your Signal HRM code`,
-      text: `Your Signal HRM ${purpose === 'reauth' ? 'confirmation' : 'sign-in'} code is ${code}. It expires in ${minutes} minutes. If you didn't ask for it, ignore this email.`,
-    });
+    try {
+      await this.mail.send({
+        to: value,
+        subject: `${code} is your Signal HRM code`,
+        text: `Your Signal HRM ${purpose === 'reauth' ? 'confirmation' : 'sign-in'} code is ${code}. It expires in ${minutes} minutes. If you didn't ask for it, ignore this email.`,
+      });
+    } catch (e: any) {
+      this.logger.error(`Failed to send OTP email to ${maskIdentifier(value)}: ${e?.message ?? e}`);
+      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'EMAIL_DELIVERY_FAILED', 'Failed to deliver verification code email. Please try again or use your password.');
+    }
     if (this.env.OTP_DEV_ECHO && this.env.APP_ENV === 'development') this.logger.warn(`[dev] OTP for ${value}: ${code}`);
     return generic;
   }
@@ -220,10 +225,14 @@ export class AuthService {
     const { channel, value } = normalizeIdentifier(raw);
     const user = await this.users.findOne(channel === 'email' ? { email: value } : { phone: value }).select('+passwordHash').lean<any>();
     const org = user ? await this.orgSettings.get(user.organizationId) : null;
-    if (!this.env.PASSWORD_LOGIN && !org?.settings?.security?.passwordLogin) {
+    const passwordAllowed = this.env.PASSWORD_LOGIN !== false || !!org?.settings?.security?.passwordLogin || Boolean(user?.passwordHash);
+    if (!passwordAllowed) {
       throw new ApiError(HttpStatus.NOT_IMPLEMENTED, 'PASSWORD_LOGIN_DISABLED', 'Password sign-in is turned off. Use a one-time code.');
     }
     if (user) await this.assertNotLocked(user);
+    if (user && !user.passwordHash) {
+      throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, 'NO_PASSWORD', 'Your account has no password set. Sign in with a one-time code.');
+    }
     if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
       if (user) await this.recordFailure(user, 'password', 'bad_password', client);
       throw new ApiError(HttpStatus.UNAUTHORIZED, 'INVALID_CREDENTIALS', 'Email or password is not right.');

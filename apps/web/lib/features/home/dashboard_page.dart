@@ -46,6 +46,7 @@ class _DashboardPageState extends State<DashboardPage> {
           final balances = mine == null ? <Json>[] : jsonList(mine['leaveBalances']);
           final pending = mine == null ? const <String, dynamic>{} : jsonMap(mine['pendingRequests']);
           final pendingTotal = pending.values.fold<num>(0, (a, b) => a + (b is num ? b : 0));
+          final showAttendance = me.feature('attendance') && (me.can('attendance', 'create') || me.employeeId != null || me.role == 'super_admin');
           return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             NEntrance(
               order: 0,
@@ -68,16 +69,23 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
             ),
             const SizedBox(height: 18),
+            if (showAttendance) ...[
+              NEntrance(
+                order: 1,
+                child: AttendanceTodayCard(onChanged: () => _view.currentState?.reload()),
+              ),
+              const SizedBox(height: 16),
+            ],
             if (attention.isNotEmpty) ...[
-              NEntrance(order: 1, child: _AttentionCard(items: attention, onChanged: () => _view.currentState?.reload())),
+              NEntrance(order: 2, child: _AttentionCard(items: attention, onChanged: () => _view.currentState?.reload())),
               const SizedBox(height: 14),
             ],
-            if (me.can('organization', 'configure', 'organization')) ...[const NEntrance(order: 2, child: _SetupChecklist()), const SizedBox(height: 14)],
-            if (mine != null) NEntrance(order: 3, child: _Personal(data: mine, onChanged: () => _view.currentState?.reload())),
-            if (team != null) ...[const SizedBox(height: 14), NEntrance(order: 4, child: _Team(data: team))],
-            if (org != null) ...[const SizedBox(height: 14), NEntrance(order: 5, child: _Organization(data: org))],
-            if (sys != null) ...[const SizedBox(height: 14), NEntrance(order: 6, child: _System(data: sys))],
-            if (mine == null && team == null && org == null && sys == null)
+            if (me.can('organization', 'configure', 'organization')) ...[const NEntrance(order: 3, child: _SetupChecklist()), const SizedBox(height: 14)],
+            if (mine != null) NEntrance(order: 4, child: _Personal(data: mine, onChanged: () => _view.currentState?.reload())),
+            if (team != null) ...[const SizedBox(height: 14), NEntrance(order: 5, child: _Team(data: team))],
+            if (org != null) ...[const SizedBox(height: 14), NEntrance(order: 6, child: _Organization(data: org))],
+            if (sys != null) ...[const SizedBox(height: 14), NEntrance(order: 7, child: _System(data: sys))],
+            if (!showAttendance && mine == null && team == null && org == null && sys == null)
               const NEmptyState(title: "You're all set", message: 'Nothing on your dashboard yet. Your administrator can link your account to an employee record.', icon: Icons.check_circle_outline_rounded),
             const SizedBox(height: 8),
             Text('Updated ${Fmt.time(d['generatedAt'])} · ${d['timezone']}', textAlign: TextAlign.end, style: NTokens.of(context).text.caption()),
@@ -181,8 +189,15 @@ Future<bool> showFormSheetLite(BuildContext context, {required Json item, requir
   return done;
 }
 
-class _SetupChecklist extends StatelessWidget {
+class _SetupChecklist extends StatefulWidget {
   const _SetupChecklist();
+
+  @override
+  State<_SetupChecklist> createState() => _SetupChecklistState();
+}
+
+class _SetupChecklistState extends State<_SetupChecklist> {
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
@@ -194,22 +209,80 @@ class _SetupChecklist extends StatelessWidget {
       builder: (context, c, _) {
         final steps = jsonList(c['steps']);
         final remaining = (c['requiredRemaining'] as num?)?.toInt() ?? 0;
-        if (remaining == 0 && (c['done'] == c['total'])) return const SizedBox.shrink();
+        final total = (c['total'] as num?)?.toInt() ?? 0;
+        final done = (c['done'] as num?)?.toInt() ?? 0;
+        if (remaining == 0 && done == total) return const SizedBox.shrink();
+        final pending = steps.where((s) => s['done'] != true).toList();
+        final fraction = total == 0 ? 0.0 : (done / total).clamp(0.0, 1.0);
+
         return InfoCard(
           title: 'Setup checklist',
-          subtitle: '${c['done']} of ${c['total']} done${remaining > 0 ? ' · $remaining required left' : ''}. Each step checks the real configuration.',
-          trailing: SizedBox(width: 120, child: NProgressBar(fraction: (c['total'] as num) == 0 ? 0 : (c['done'] as num) / (c['total'] as num), semanticLabel: 'Setup progress')),
-          child: Column(children: [
-            for (final s in steps.where((s) => s['done'] != true))
-              NListRow(
-                dense: true,
-                leading: Icon(s['required'] == true ? Icons.radio_button_unchecked_rounded : Icons.circle_outlined, size: 18, color: s['required'] == true ? t.amber : t.muted),
-                title: '${s['title']}${s['required'] == true ? '' : ' (optional)'}',
-                subtitle: '${s['description']} · ${s['status']}',
-                onTap: () => context.go(resolveLink(s['link'] as String?)),
-                trailing: Icon(Icons.chevron_right_rounded, color: t.muted),
+          subtitle: '$done of $total complete${remaining > 0 ? ' · $remaining required left' : ' · Optional steps'}',
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 90,
+                child: NProgressBar(fraction: fraction, semanticLabel: 'Setup progress'),
               ),
-          ]),
+              const SizedBox(width: 8),
+              NButton(
+                label: _expanded ? 'Hide' : 'View ($done/$total)',
+                compact: true,
+                variant: NButtonVariant.secondary,
+                icon: _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                onPressed: () => setState(() => _expanded = !_expanded),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (!_expanded) ...[
+                if (pending.isNotEmpty)
+                  InkWell(
+                    borderRadius: BorderRadius.circular(t.radiusTile),
+                    onTap: () => context.go(resolveLink(pending.first['link'] as String?)),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                      child: Row(
+                        children: [
+                          Icon(
+                            pending.first['required'] == true ? Icons.radio_button_unchecked_rounded : Icons.circle_outlined,
+                            size: 16,
+                            color: pending.first['required'] == true ? t.amber : t.muted,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Next: ${pending.first['title']} — ${pending.first['description']}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: t.text.caption(weight: FontWeight.w500).copyWith(color: t.ink),
+                            ),
+                          ),
+                          Icon(Icons.chevron_right_rounded, size: 16, color: t.muted),
+                        ],
+                      ),
+                    ),
+                  ),
+              ] else ...[
+                for (final s in pending)
+                  NListRow(
+                    dense: true,
+                    leading: Icon(
+                      s['required'] == true ? Icons.radio_button_unchecked_rounded : Icons.circle_outlined,
+                      size: 18,
+                      color: s['required'] == true ? t.amber : t.muted,
+                    ),
+                    title: '${s['title']}${s['required'] == true ? '' : ' (optional)'}',
+                    subtitle: '${s['description']} · ${s['status']}',
+                    onTap: () => context.go(resolveLink(s['link'] as String?)),
+                    trailing: Icon(Icons.chevron_right_rounded, color: t.muted),
+                  ),
+              ],
+            ],
+          ),
         );
       },
     );
@@ -233,15 +306,39 @@ class _Personal extends StatelessWidget {
     final news = jsonList(data['announcements']);
     final payslip = data['latestPayslip'] == null ? null : jsonMap(data['latestPayslip']);
     final pending = jsonMap(data['pendingRequests']);
+
+    Widget emptyTile(IconData icon, String title, String subtitle, {Color? iconColor}) => Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: (iconColor ?? t.muted).withValues(alpha: t.isDark ? 0.16 : 0.08),
+                borderRadius: BorderRadius.circular(t.radiusTile),
+              ),
+              child: Icon(icon, color: iconColor ?? t.muted, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: t.text.body(weight: FontWeight.w500)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: t.text.caption(color: t.muted)),
+                ],
+              ),
+            ),
+          ],
+        );
+
     return CardGrid(children: [
-      if (me.feature('attendance') && me.can('attendance', 'create')) AttendanceTodayCard(compact: true, onChanged: onChanged),
       if (me.feature('leave'))
         InfoCard(
           title: 'Leave balance',
           subtitle: '${pending['leave'] ?? 0} request(s) waiting',
           trailing: TextButton(onPressed: () => context.go('/time/leave'), child: Text('Apply', style: t.text.caption(color: t.ink, weight: FontWeight.w600))),
           child: balances.isEmpty
-              ? Text('No balances yet for this year.', style: t.text.body(color: t.muted))
+              ? emptyTile(Icons.beach_access_rounded, 'No balances yet for this year', 'Policies will be assigned by HR')
               : Column(children: [
                   for (final b in balances)
                     Padding(
@@ -263,7 +360,7 @@ class _Personal extends StatelessWidget {
           subtitle: '${(jsonMap(tasks['byStatus']).values.fold<num>(0, (a, b) => a + (b as num)))} open tasks',
           trailing: TextButton(onPressed: () => context.go('/work'), child: Text('Open board', style: t.text.caption(color: t.ink, weight: FontWeight.w600))),
           child: due.isEmpty
-              ? Text('Nothing due today or overdue.', style: t.text.body(color: t.muted))
+              ? emptyTile(Icons.task_alt_rounded, 'Nothing due today or overdue', 'You\'re all caught up with your tasks', iconColor: t.teal)
               : Column(children: [
                   for (final task in due)
                     NListRow(
@@ -278,7 +375,7 @@ class _Personal extends StatelessWidget {
       InfoCard(
         title: 'Coming up',
         child: (holidays.isEmpty && events.isEmpty && news.isEmpty)
-            ? Text('No upcoming holidays, events or announcements.', style: t.text.body(color: t.muted))
+            ? emptyTile(Icons.event_available_rounded, 'No upcoming holidays or events', 'Announcements and events appear here')
             : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 for (final h in holidays) NListRow(dense: true, leading: Icon(Icons.beach_access_rounded, size: 18, color: t.teal), title: '${h['name']}', subtitle: '${Fmt.weekday(h['date'])}, ${Fmt.date(h['date'])}${h['optional'] == true ? ' · optional' : ''}'),
                 for (final e in events) NListRow(dense: true, leading: Icon(Icons.event_rounded, size: 18, color: t.accent), title: '${e['title']}', subtitle: Fmt.dateTime(e['startAt'])),
@@ -305,6 +402,7 @@ class _Team extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = NTokens.of(context);
     final today = jsonMap(data['today']);
     final trend = jsonList(data['trend']);
     final tasks = jsonMap(data['tasksByStatus']);
@@ -324,12 +422,16 @@ class _Team extends StatelessWidget {
         ),
         InfoCard(
           title: 'Attendance, last 14 days',
-          child: NBars(semanticLabel: 'People checked in per day', data: [for (final r in trend) NDatum(Fmt.shortDate(r['day']).split(' ').first, r['present'] as num)], highlightLast: true),
+          child: trend.isEmpty
+              ? Text('No attendance history yet.', style: t.text.body(color: t.muted))
+              : NBars(height: 100, semanticLabel: 'People checked in per day', data: [for (final r in trend) NDatum(Fmt.shortDate(r['day']).split(' ').first, r['present'] as num)], highlightLast: true),
         ),
         InfoCard(
           title: 'Team tasks',
           subtitle: '${data['approvalsWaiting']} approvals waiting for you',
-          child: NDonut(semanticLabel: 'Tasks by status', centerLabel: 'tasks', data: [for (final e in tasks.entries) NDatum(Fmt.label(e.key), e.value as num)]),
+          child: tasks.isEmpty
+              ? Text('No team tasks.', style: t.text.body(color: t.muted))
+              : NDonut(size: 110, semanticLabel: 'Tasks by status', centerLabel: 'tasks', data: [for (final e in tasks.entries) NDatum(Fmt.label(e.key), e.value as num)]),
         ),
       ]),
     ]);
@@ -342,6 +444,7 @@ class _Organization extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = NTokens.of(context);
     final me = context.me;
     final head = jsonMap(data['headcount']);
     final today = jsonMap(data['today']);
@@ -351,6 +454,32 @@ class _Organization extends StatelessWidget {
     final funnel = data['leadFunnel'] == null ? null : jsonMap(data['leadFunnel']);
     final payroll = data['latestPayroll'] == null ? null : jsonMap(data['latestPayroll']);
     const stages = ['new', 'contacted', 'interested', 'qualified', 'meeting_scheduled', 'proposal', 'won', 'lost', 'unreachable'];
+    final totalLeads = funnel == null ? 0 : funnel.values.fold<num>(0, (a, b) => a + (b is num ? b : 0));
+
+    Widget statusTile(IconData icon, String title, String subtitle, {Color? iconColor}) => Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: (iconColor ?? t.muted).withValues(alpha: t.isDark ? 0.16 : 0.08),
+                borderRadius: BorderRadius.circular(t.radiusTile),
+              ),
+              child: Icon(icon, color: iconColor ?? t.muted, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: t.text.body(weight: FontWeight.w500)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: t.text.caption(color: t.muted)),
+                ],
+              ),
+            ),
+          ],
+        );
+
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const NSectionHeader(title: 'Across the', boldWord: 'organization'),
       CardGrid(children: [
@@ -377,18 +506,29 @@ class _Organization extends StatelessWidget {
           ]),
         ),
         InfoCard(
-          title: 'By department',
-          child: depts.isEmpty
-              ? const Text('No departments yet.')
-              : NBars(semanticLabel: 'Active people by department', data: [for (final d in depts.take(8)) NDatum('${d['name']}', d['count'] as num)]),
-        ),
-        InfoCard(
           title: 'Requests',
           onTap: () => context.go('/approvals'),
           child: Wrap(spacing: 24, runSpacing: 12, children: [
             NKpi(label: 'Approvals pending', value: data['approvalsPending'] as num?, size: 34),
             NKpi(label: 'Leave pending', value: data['leavePending'] as num?, size: 34),
           ]),
+        ),
+        InfoCard(
+          title: 'By department',
+          child: depts.isEmpty
+              ? statusTile(Icons.apartment_rounded, 'No departments yet', 'Configure departments in Admin')
+              : (depts.length == 1
+                  ? statusTile(
+                      Icons.apartment_rounded,
+                      '${depts.first['name']}',
+                      '${depts.first['count']} active ${depts.first['count'] == 1 ? 'member' : 'members'}',
+                      iconColor: t.accent,
+                    )
+                  : NBars(
+                      height: 100,
+                      semanticLabel: 'Active people by department',
+                      data: [for (final d in depts.take(6)) NDatum('${d['name']}', d['count'] as num)],
+                    )),
         ),
         if (exp != null)
           InfoCard(
@@ -403,16 +543,23 @@ class _Organization extends StatelessWidget {
           InfoCard(
             title: 'Lead pipeline',
             onTap: () => context.go('/work/leads'),
-            child: NBars(semanticLabel: 'Leads by stage', data: [for (final s in stages) if (funnel.containsKey(s)) NDatum(Fmt.label(s), funnel[s] as num)]),
+            child: totalLeads == 0
+                ? statusTile(Icons.filter_alt_outlined, 'No active leads in pipeline', 'Track and nurture opportunities in Work')
+                : NBars(
+                    height: 100,
+                    semanticLabel: 'Leads by stage',
+                    data: [for (final s in stages) if (funnel.containsKey(s) && (funnel[s] as num) > 0) NDatum(Fmt.label(s), funnel[s] as num)],
+                  ),
           ),
         if (me.can('payroll', 'view', 'organization'))
           InfoCard(
             title: 'Payroll',
             onTap: () => context.go('/money/payroll'),
             child: payroll == null
-                ? Text('No payroll run yet.', style: NTokens.of(context).text.body(color: NTokens.of(context).muted))
+                ? statusTile(Icons.payments_outlined, 'No payroll run yet', 'Process or review payroll runs in Money')
                 : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    Row(children: [Expanded(child: Text('${payroll['label'] ?? payroll['periodStart']}')), StatusChip('${payroll['status']}')]),
+                    Row(children: [Expanded(child: Text('${payroll['label'] ?? payroll['periodStart']}', style: t.text.body(weight: FontWeight.w600))), StatusChip('${payroll['status']}')]),
+                    const SizedBox(height: 8),
                     NInfoRow(label: 'Net pay', value: Fmt.money(jsonMap(payroll['totals'])['net'], me.currency)),
                     NInfoRow(label: 'Anomalies', value: '${payroll['anomalies'] ?? 0}'),
                   ]),

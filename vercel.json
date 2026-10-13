@@ -4,6 +4,10 @@
   "outputDirectory": "apps/web/build/web",
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "https://signal-hrm-api.onrender.com/api/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

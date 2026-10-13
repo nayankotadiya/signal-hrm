@@ -27,7 +27,7 @@ build_web() {
     --dart-define=APP_ENV=production \
     --dart-define=API_BASE_URL="$API_URL" \
     --dart-define=PASSWORD_LOGIN="${PASSWORD_LOGIN:-true}" \
-    --dart-define=GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}" \
+    --dart-define=GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-496408398091-dtkgg1289q8uv2dqupahuiooc3c52ui2.apps.googleusercontent.com}" \
     --dart-define=APPLE_CLIENT_ID="${APPLE_CLIENT_ID:-}" \
     --dart-define=APPLE_REDIRECT_URI="${APPLE_REDIRECT_URI:-}"
 }
