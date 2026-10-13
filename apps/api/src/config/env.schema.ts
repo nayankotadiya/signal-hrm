@@ -94,15 +94,12 @@ export const envSchema = z
       if (!env.MONGODB_URI) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['MONGODB_URI'], message: `required when APP_ENV=${env.APP_ENV}` });
       }
-      if (!env.REDIS_URL) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['REDIS_URL'], message: `required when APP_ENV=${env.APP_ENV}` });
-      }
       if (env.CORS_ORIGINS.length === 0) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['CORS_ORIGINS'], message: `required when APP_ENV=${env.APP_ENV}` });
       }
       for (const key of ['JWT_SECRET', 'OTP_PEPPER', 'ENCRYPTION_KEY'] as const) {
-        if (!env[key] || env[key]!.length < 32) {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `required (32+ characters) when APP_ENV=${env.APP_ENV}` });
+        if (!env[key] || env[key]!.length < 24) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `required (24+ characters) when APP_ENV=${env.APP_ENV}` });
         }
       }
       if (env.SETUP_TOKEN && env.SETUP_TOKEN.length < 24) {

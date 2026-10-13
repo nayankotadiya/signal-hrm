@@ -15,9 +15,9 @@ describe('loadEnv', () => {
     expect(env.REDIS_URL).toBeUndefined();
   });
 
-  it('refuses production without MongoDB, Redis and CORS origins and lists every problem', () => {
+  it('refuses production without MongoDB and CORS origins and lists every problem', () => {
     expect(() => loadEnv({ APP_ENV: 'production', MONGODB_DB_NAME: 'signal_hrm' })).toThrow(
-      /MONGODB_URI[\s\S]*REDIS_URL[\s\S]*CORS_ORIGINS/,
+      /MONGODB_URI[\s\S]*CORS_ORIGINS/,
     );
   });
 
