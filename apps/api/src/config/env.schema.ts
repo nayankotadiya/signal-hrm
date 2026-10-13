@@ -46,7 +46,7 @@ export const envSchema = z
     OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
     OTP_RESEND_SECONDS: z.coerce.number().int().positive().default(60),
     OTP_DEV_ECHO: bool.default(false), // development only: also logs codes to the server console
-    PASSWORD_LOGIN: bool.default(false),
+    PASSWORD_LOGIN: bool.default(true),
     /** One-time first-admin setup from the sign-in screen (hosts without a shell). 24+ characters; remove after setup. */
     SETUP_TOKEN: optionalString,
     GOOGLE_CLIENT_IDS: z.string().default('').transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean)),
