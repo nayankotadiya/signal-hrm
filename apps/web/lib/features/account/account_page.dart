@@ -148,6 +148,45 @@ class _NotificationPrefsState extends State<_NotificationPrefs> {
           }
 
           return Column(children: [
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: t.card,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: t.cardBorder),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.notifications_active_rounded, color: t.primaryButton),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('24/7 Background Push Alerts', style: t.text.body(weight: FontWeight.w600)),
+                        Text('Receive instant alerts even when the browser or app is closed.', style: t.text.caption()),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  NButton(
+                    label: 'Enable',
+                    variant: NButtonVariant.secondary,
+                    onPressed: () async {
+                      final ok = await bridge.subscribePushNotifications(context.api.baseUrl, context.api.token);
+                      if (context.mounted) {
+                        if (ok) {
+                          NToast.of(context).show('24/7 background push notifications active on this device!');
+                        } else {
+                          NToast.of(context).show('Push notifications could not be enabled. Please check browser permissions.');
+                        }
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
             Row(children: [
               const Expanded(child: SizedBox()),
               SizedBox(width: 56, child: Text('In app', textAlign: TextAlign.center, style: t.text.caption())),

@@ -44,4 +44,7 @@ class StubBridge implements PlatformBridge {
 
   @override
   Stream<bool> get onlineChanges => const Stream.empty();
+
+  @override
+  Future<bool> subscribePushNotifications(String apiBaseUrl, String? token) async => false;
 }

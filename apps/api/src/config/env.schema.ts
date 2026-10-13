@@ -72,6 +72,11 @@ export const envSchema = z
     MONGORESTORE_PATH: z.string().default('mongorestore'),
     BACKUP_WORK_DIR: z.string().default('./var/backups'),
 
+    // Web Push Notifications (24/7 background delivery even when app is closed)
+    VAPID_PUBLIC_KEY: z.string().default('BN85zPW2Mp0qjdQrWHz9hn2cWbgpLPaXmN0G7rkD-cgQbw3woMYo8euzAtoMop-JpoLUdrYOa1fIfDq0h0RkTfY'),
+    VAPID_PRIVATE_KEY: z.string().default('XoesusJN7yzkgQww1AtyG19xnljaGb9BPvb1z1a1WF0'),
+    VAPID_SUBJECT: z.string().default('mailto:support@signalhrm.com'),
+
     // Integrations
     META_APP_SECRET: optionalString,
     META_VERIFY_TOKEN: optionalString,

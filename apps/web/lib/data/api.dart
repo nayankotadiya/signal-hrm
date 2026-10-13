@@ -78,6 +78,7 @@ class ApiClient {
   Future<bool> Function()? onReauthRequired;
 
   bool get hasToken => _accessToken != null;
+  String? get token => _accessToken;
 
   void setToken(String? token, {int? expiresIn}) {
     _accessToken = token;

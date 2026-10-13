@@ -50,6 +50,9 @@ extension type _AppleAuthorization._(JSObject _) implements JSObject {
   external String? get id_token;
 }
 
+@JS('SignalPush.subscribe')
+external JSPromise<JSObject?> _signalPushSubscribe(JSString apiBaseUrl, JSString token);
+
 class WebBridge implements PlatformBridge {
   WebBridge() {
     web.window.addEventListener('online', ((web.Event _) => _online.add(true)).toJS);
@@ -227,4 +230,15 @@ class WebBridge implements PlatformBridge {
 
   @override
   Stream<bool> get onlineChanges => _online.stream;
+
+  @override
+  Future<bool> subscribePushNotifications(String apiBaseUrl, String? token) async {
+    try {
+      final promise = _signalPushSubscribe(apiBaseUrl.toJS, (token ?? '').toJS);
+      final res = await promise.toDart;
+      return res != null;
+    } catch (_) {
+      return false;
+    }
+  }
 }

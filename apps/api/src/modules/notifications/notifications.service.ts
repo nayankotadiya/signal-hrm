@@ -1,10 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { Model, Types } from 'mongoose';
+import * as webpush from 'web-push';
 import type { Ctx } from '../../common/auth/context';
 import { badRequest, ListQuery, notFound, oid, Paged } from '../../common/http/validation';
 import { MailService } from '../../common/mail/mail.service';
 import { OrgSettingsService } from '../../common/org/org-settings.service';
+import { APP_CONFIG } from '../../config/config.module';
+import type { AppEnv } from '../../config/env.schema';
 import { InjectModel, serialize } from '../../database/model';
 import { JobsService } from '../system/jobs.service';
 import { RealtimeService } from './realtime.service';
@@ -52,10 +55,11 @@ export interface NotifyInput {
 }
 
 @Injectable()
-export class NotificationsService {
+export class NotificationsService implements OnModuleInit {
   private readonly logger = new Logger('Notifications');
 
   constructor(
+    @Inject(APP_CONFIG) private readonly env: AppEnv,
     private readonly realtime: RealtimeService,
     private readonly mail: MailService,
     private readonly orgSettings: OrgSettingsService,
@@ -64,8 +68,19 @@ export class NotificationsService {
     @InjectModel('NotificationPreference') private readonly prefs: Model<any>,
     @InjectModel('NotificationTemplate') private readonly templates: Model<any>,
     @InjectModel('NotificationDelivery') private readonly deliveries: Model<any>,
+    @InjectModel('PushSubscription') private readonly pushSubs: Model<any>,
     @InjectModel('User') private readonly users: Model<any>,
   ) {}
+
+  onModuleInit(): void {
+    if (this.env.VAPID_PUBLIC_KEY && this.env.VAPID_PRIVATE_KEY) {
+      try {
+        webpush.setVapidDetails(this.env.VAPID_SUBJECT, this.env.VAPID_PUBLIC_KEY, this.env.VAPID_PRIVATE_KEY);
+      } catch (err: any) {
+        this.logger.warn(`Failed to initialize VAPID details: ${err.message}`);
+      }
+    }
+  }
 
   private async isEssential(orgId: Types.ObjectId, input: NotifyInput): Promise<boolean> {
     if (input.priority === 'essential') return true;
@@ -85,6 +100,7 @@ export class NotificationsService {
         const ch = prefBy.get(String(userId))?.[input.event] ?? {};
         const inApp = essential || ch.in_app !== false;
         const email = essential ? true : (ch.email ?? EMAIL_BY_DEFAULT.has(String(input.event)));
+        const push = essential || ch.push !== false;
         let notificationId: Types.ObjectId | undefined;
         if (inApp) {
           const n = await this.notifications.create({ organizationId: orgId, userId, event: input.event, title: input.title, body: input.body, link: input.link, priority: input.priority ?? 'normal', data: input.data });
@@ -95,10 +111,85 @@ export class NotificationsService {
         if (email) {
           await this.deliveries.create({ organizationId: orgId, notificationId, userId, event: input.event, channel: 'email', status: 'queued', nextAttemptAt: new Date() });
         }
+        if (push) {
+          void this.sendWebPush(orgId, userId, input, notificationId).catch(() => undefined);
+        }
       }
       if (unique.length) void this.deliverQueued().catch(() => undefined);
     } catch (e) {
       this.logger.error(`notify(${input.event}) failed: ${(e as Error).message}`);
+    }
+  }
+
+  getVapidPublicKey(): { publicKey: string } {
+    return { publicKey: this.env.VAPID_PUBLIC_KEY };
+  }
+
+  async subscribePush(
+    ctx: Ctx,
+    subscription: { endpoint: string; keys: { p256dh: string; auth: string }; userAgent?: string },
+  ): Promise<{ success: boolean }> {
+    await this.pushSubs.updateOne(
+      { organizationId: ctx.orgOid, endpoint: subscription.endpoint },
+      {
+        $set: {
+          organizationId: ctx.orgOid,
+          userId: ctx.userOid,
+          endpoint: subscription.endpoint,
+          keys: subscription.keys,
+          userAgent: subscription.userAgent,
+          lastActiveAt: new Date(),
+        },
+      },
+      { upsert: true },
+    );
+    return { success: true };
+  }
+
+  async unsubscribePush(ctx: Ctx, endpoint: string): Promise<{ success: boolean }> {
+    await this.pushSubs.deleteOne({ organizationId: ctx.orgOid, endpoint, userId: ctx.userOid });
+    return { success: true };
+  }
+
+  private async sendWebPush(
+    orgId: Types.ObjectId,
+    userId: Types.ObjectId,
+    input: NotifyInput,
+    notificationId?: Types.ObjectId,
+  ): Promise<void> {
+    const subs = await this.pushSubs.find({ organizationId: orgId, userId }).lean<any[]>();
+    if (!subs.length) return;
+
+    const payload = JSON.stringify({
+      title: input.title,
+      body: input.body ?? '',
+      icon: '/icons/Icon-192.png',
+      badge: '/icons/Icon-192.png',
+      data: {
+        link: input.link ?? '/notifications',
+        event: input.event,
+        notificationId: notificationId ? String(notificationId) : undefined,
+      },
+    });
+
+    for (const sub of subs) {
+      if (!sub.endpoint || !sub.keys?.p256dh || !sub.keys?.auth) continue;
+      try {
+        await webpush.sendNotification(
+          {
+            endpoint: sub.endpoint,
+            keys: {
+              p256dh: sub.keys.p256dh,
+              auth: sub.keys.auth,
+            },
+          },
+          payload,
+        );
+      } catch (err: any) {
+        if (err.statusCode === 404 || err.statusCode === 410) {
+          await this.pushSubs.deleteOne({ _id: sub._id }).catch(() => undefined);
+        }
+      }
     }
   }
 

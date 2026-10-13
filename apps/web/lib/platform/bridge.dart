@@ -55,6 +55,9 @@ abstract class PlatformBridge {
 
   bool get online;
   Stream<bool> get onlineChanges;
+
+  /// Subscribes the current device/browser to Web Push notifications for 24/7 background alerts.
+  Future<bool> subscribePushNotifications(String apiBaseUrl, String? token);
 }
 
 final PlatformBridge bridge = impl.create();
