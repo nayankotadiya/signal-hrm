@@ -163,15 +163,20 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _sendCode() async {
     final id = _identifier.text.trim();
     if (id.length < 3) {
-      setState(() => _error = 'Enter your work email or phone number.');
+      setState(() => _error = 'Enter your work email.');
       return;
     }
     await _run(() async {
       final r = await _session.requestOtp(id);
-      _destination = r.destination;
-      _code.clear();
-      _codeSent = true;
-      _startTimer(r.resendAfterSeconds);
+      if (mounted) {
+        setState(() {
+          _destination = r.destination;
+          _code.clear();
+          _codeSent = true;
+          _mode = _AuthMode.otp;
+          _startTimer(r.resendAfterSeconds);
+        });
+      }
     });
   }
 
@@ -347,6 +352,17 @@ class _LoginPageState extends State<LoginPage> {
             busy: _busy,
             onPressed: _submitPassword,
           ),
+          const SizedBox(height: 10),
+          Center(
+            child: TextButton.icon(
+              icon: const Icon(Icons.mail_outline_rounded, size: 16),
+              label: Text('Sign in with Email OTP instead', style: t.text.caption(color: t.ink)),
+              onPressed: () => setState(() {
+                _mode = _AuthMode.otp;
+                _error = null;
+              }),
+            ),
+          ),
         ] else ...[
           // OTP Mode
           if (!_codeSent) ...[
@@ -363,19 +379,53 @@ class _LoginPageState extends State<LoginPage> {
             ),
             const SizedBox(height: 14),
             NButton(
-              label: 'Send verification code',
+              label: 'Send 6-digit verification code',
               icon: Icons.send_rounded,
               variant: NButtonVariant.accent,
               busy: _busy,
               onPressed: _sendCode,
             ),
+            const SizedBox(height: 10),
+            Center(
+              child: TextButton.icon(
+                icon: const Icon(Icons.password_rounded, size: 16),
+                label: Text('Sign in with Password instead', style: t.text.caption(color: t.ink)),
+                onPressed: () => setState(() {
+                  _mode = _AuthMode.password;
+                  _error = null;
+                }),
+              ),
+            ),
           ] else ...[
-            Text('Check your inbox / phone', style: t.text.title(size: 16)),
-            const SizedBox(height: 4),
-            Text('Code sent to ${_destination ?? _identifier.text}. Enter the 6 digits below.', style: t.text.caption(color: t.muted)),
-            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: t.green.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: t.green.withValues(alpha: 0.35)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.mark_email_read_rounded, color: t.green, size: 24),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Verification Code Sent ✓', style: t.text.caption(color: t.green).copyWith(fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 2),
+                        Text('Check inbox: ${_destination ?? _identifier.text}', style: t.text.caption(color: t.ink)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text('Enter 6-digit Code', style: t.text.title(size: 15)),
+            const SizedBox(height: 8),
             NTextField(
-              label: '6-digit code',
+              label: '6-digit OTP code',
               controller: _code,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
@@ -383,12 +433,13 @@ class _LoginPageState extends State<LoginPage> {
               autofocus: true,
               onSubmitted: (_) => _verifyOtp(),
               onChanged: (v) {
-                if (v.length == 6 && !_busy) _verifyOtp();
+                if (v.trim().length == 6 && !_busy) _verifyOtp();
               },
             ),
             const SizedBox(height: 14),
             NButton(
-              label: 'Verify & Sign in',
+              label: 'Verify Code & Sign In',
+              icon: Icons.login_rounded,
               variant: NButtonVariant.accent,
               busy: _busy,
               onPressed: _verifyOtp,
@@ -402,7 +453,7 @@ class _LoginPageState extends State<LoginPage> {
                     _codeSent = false;
                     _code.clear();
                   }),
-                  child: Text('Change address/number', style: t.text.caption(color: t.ink)),
+                  child: Text('Change email address', style: t.text.caption(color: t.ink)),
                 ),
                 TextButton(
                   onPressed: _resendIn > 0 || _busy ? null : _sendCode,
@@ -412,6 +463,17 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 6),
+            Center(
+              child: TextButton.icon(
+                icon: const Icon(Icons.password_rounded, size: 16),
+                label: Text('Use Password instead', style: t.text.caption(color: t.muted)),
+                onPressed: () => setState(() {
+                  _mode = _AuthMode.password;
+                  _error = null;
+                }),
+              ),
             ),
           ],
         ],
