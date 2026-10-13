@@ -35,11 +35,16 @@ class AuthFrame extends StatelessWidget {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   const NEntrance(
                     order: 0,
-                    child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      SignalMark(size: 44),
-                      SizedBox(width: 14),
-                      SignalWordmark(size: 24),
-                    ]),
+                    child: Wrap(
+                      alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 14,
+                      runSpacing: 8,
+                      children: [
+                        SignalMark(size: 44),
+                        SignalWordmark(size: 24),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 26),
                   NEntrance(order: 1, child: NGlassCard(padding: const EdgeInsets.all(24), child: child)),
@@ -55,7 +60,7 @@ class AuthFrame extends StatelessWidget {
   }
 }
 
-enum _Step { identifier, code, password, recovery }
+enum _AuthMode { password, otp, recovery }
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key, this.expired = false, this.recovery = false});
@@ -67,10 +72,12 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  late _Step _step = widget.recovery ? _Step.recovery : _Step.identifier;
+  late _AuthMode _mode = widget.recovery ? _AuthMode.recovery : _AuthMode.password;
   final _identifier = TextEditingController();
   final _code = TextEditingController();
   final _password = TextEditingController();
+  bool _obscurePassword = true;
+  bool _codeSent = false;
   String? _error;
   String? _destination;
   bool _busy = false;
@@ -79,27 +86,20 @@ class _LoginPageState extends State<LoginPage> {
 
   SessionController get _session => context.services.session;
 
-  /// Sign-in options this server offers (GET /setup/status). Null until loaded or if unreachable.
+  /// Sign-in options this server offers (GET /setup/status).
   Json? _server;
-  bool get _passwordOn => AppConfig.passwordLogin || _server?['passwordLogin'] == true;
-  bool get _emailCodes => _server?['emailCodes'] != false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      try {
-        final s = jsonMap(await context.api.get('/setup/status'));
-        if (!mounted) return;
-        setState(() {
-          _server = s;
-          // Without email codes, the password form is the way in.
-          if (!_emailCodes && _passwordOn && _step == _Step.identifier) _step = _Step.password;
-        });
-      } catch (_) {
-        // Older server or offline: keep the default options.
-      }
-    });
+    if (!AppConfig.passwordLogin) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        try {
+          final s = jsonMap(await context.api.get('/setup/status'));
+          if (mounted) setState(() => _server = s);
+        } catch (_) {}
+      });
+    }
   }
 
   List<Widget> _setupBanner() => [
@@ -146,164 +146,334 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  Future<void> _submitPassword() async {
+    final id = _identifier.text.trim();
+    final pwd = _password.text;
+    if (id.isEmpty) {
+      setState(() => _error = 'Enter your work email.');
+      return;
+    }
+    if (pwd.isEmpty) {
+      setState(() => _error = 'Enter your password.');
+      return;
+    }
+    await _run(() => _session.password(id, pwd));
+  }
+
   Future<void> _sendCode() async {
     final id = _identifier.text.trim();
     if (id.length < 3) {
-      setState(() => _error = 'Enter your work email.');
+      setState(() => _error = 'Enter your work email or phone number.');
       return;
     }
     await _run(() async {
       final r = await _session.requestOtp(id);
       _destination = r.destination;
       _code.clear();
-      _step = _Step.code;
+      _codeSent = true;
       _startTimer(r.resendAfterSeconds);
     });
   }
 
-  Future<void> _verify() async {
+  Future<void> _verifyOtp() async {
     final code = _code.text.trim();
     if (!RegExp(r'^\d{6}$').hasMatch(code)) {
       setState(() => _error = 'Enter the 6-digit code.');
       return;
     }
-    await _run(() => _session.verifyOtp(_identifier.text, code));
+    await _run(() => _session.verifyOtp(_identifier.text.trim(), code));
   }
 
   @override
   Widget build(BuildContext context) {
     final t = NTokens.of(context);
     final children = <Widget>[];
-    switch (_step) {
-      case _Step.identifier:
-        children.addAll([
-          ..._setupBanner(),
-          Text('Sign in', style: t.text.heading(size: 28)),
-          const SizedBox(height: 4),
-          Text('Use the work email your administrator invited.', style: t.text.body(color: t.muted)),
-          const SizedBox(height: 18),
-          AutofillGroup(
-            child: NTextField(
-              label: 'Work email',
-              controller: _identifier,
-              keyboardType: TextInputType.emailAddress,
-              autofillHints: const [AutofillHints.email, AutofillHints.username],
-              textInputAction: TextInputAction.go,
-              autofocus: true,
-              onSubmitted: (_) => _sendCode(),
-            ),
-          ),
-          const SizedBox(height: 14),
-          NButton(label: 'Email me a code', icon: Icons.mail_outline_rounded, variant: NButtonVariant.accent, busy: _busy, onPressed: _sendCode),
-          if (AppConfig.googleClientId.isNotEmpty || AppConfig.appleClientId.isNotEmpty || _passwordOn) ...[
-            const SizedBox(height: 18),
-            Row(children: [
-              Expanded(child: Divider(color: t.divider)),
-              Padding(padding: const EdgeInsets.symmetric(horizontal: 10), child: Text('or', style: t.text.caption())),
-              Expanded(child: Divider(color: t.divider)),
-            ]),
-            const SizedBox(height: 14),
-          ],
-          if (AppConfig.googleClientId.isNotEmpty)
-            Center(
-              child: bridge.googleButton(
-                    clientId: AppConfig.googleClientId,
-                    onToken: (token) => _run(() => _session.google(token)),
-                    onError: () => setState(() => _error = "Google sign-in couldn't start. Use your email instead."),
-                  ) ??
-                  const SizedBox.shrink(),
-            ),
-          if (AppConfig.appleClientId.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            NButton(
-              label: 'Continue with Apple',
-              icon: Icons.apple,
-              variant: NButtonVariant.secondary,
-              busy: _busy,
-              onPressed: () => _run(() async {
-                final token = await bridge.appleSignIn(AppConfig.appleClientId, AppConfig.appleRedirectUri);
-                if (token == null) throw const ApiException(status: 0, code: 'APPLE_CANCELLED', message: 'Apple sign-in was cancelled.');
-                await _session.apple(token);
-              }),
-            ),
-          ],
-          if (_passwordOn) ...[
-            const SizedBox(height: 10),
-            NButton(label: 'Sign in with a password', icon: Icons.password_rounded, variant: NButtonVariant.secondary, onPressed: () => setState(() => _step = _Step.password)),
-          ],
-          const SizedBox(height: 14),
-          Center(child: TextButton(onPressed: () => setState(() => _step = _Step.recovery), child: Text('Lost access? Use a recovery code', style: t.text.caption(color: t.ink)))),
-          Center(child: TextButton(onPressed: () => context.go('/status'), child: Text('Server status', style: t.text.caption()))),
-        ]);
-      case _Step.code:
-        children.addAll([
-          Text('Check your email', style: t.text.heading(size: 28)),
-          const SizedBox(height: 4),
-          Text('If ${_destination ?? 'that address'} has an account, a 6-digit code is on its way. It expires in a few minutes.', style: t.text.body(color: t.muted)),
-          const SizedBox(height: 18),
-          NTextField(
-            label: 'Code',
-            controller: _code,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
-            autofillHints: const [AutofillHints.oneTimeCode],
-            autofocus: true,
-            onSubmitted: (_) => _verify(),
-            onChanged: (v) {
-              if (v.length == 6 && !_busy) _verify();
-            },
-          ),
-          const SizedBox(height: 14),
-          NButton(label: 'Sign in', variant: NButtonVariant.accent, busy: _busy, onPressed: _verify),
-          const SizedBox(height: 10),
-          Wrap(alignment: WrapAlignment.spaceBetween, children: [
-            TextButton(onPressed: () => setState(() => _step = _Step.identifier), child: Text('Use a different email', style: t.text.caption(color: t.ink))),
-            TextButton(
-              onPressed: _resendIn > 0 || _busy ? null : _sendCode,
-              child: Text(_resendIn > 0 ? 'Resend in ${_resendIn}s' : 'Send a new code', style: t.text.caption(color: _resendIn > 0 ? t.muted : t.ink)),
-            ),
-          ]),
-        ]);
-      case _Step.password:
-        children.addAll([
-          ..._setupBanner(),
-          Text('Sign in', style: t.text.heading(size: 28)),
-          const SizedBox(height: 18),
-          AutofillGroup(
-            child: Column(children: [
-              NTextField(label: 'Work email', controller: _identifier, keyboardType: TextInputType.emailAddress, autofillHints: const [AutofillHints.username]),
-              const SizedBox(height: 12),
-              NTextField(label: 'Password', controller: _password, obscure: true, autofillHints: const [AutofillHints.password], onSubmitted: (_) => _run(() => _session.password(_identifier.text, _password.text))),
-            ]),
-          ),
-          const SizedBox(height: 14),
-          NButton(label: 'Sign in', variant: NButtonVariant.accent, busy: _busy, onPressed: () => _run(() => _session.password(_identifier.text, _password.text))),
-          if (_emailCodes)
-            TextButton(onPressed: () => setState(() => _step = _Step.identifier), child: Text('Use an email code instead', style: t.text.caption(color: t.ink)))
-          else
-            TextButton(onPressed: () => setState(() => _step = _Step.recovery), child: Text('Forgot your password? Use a recovery code', style: t.text.caption(color: t.ink))),
-          Center(child: TextButton(onPressed: () => context.go('/status'), child: Text('Server status', style: t.text.caption()))),
-        ]);
-      case _Step.recovery:
-        children.addAll([
-          Text('Recovery code', style: t.text.heading(size: 28)),
-          const SizedBox(height: 4),
-          Text('Each recovery code works once. Signing in this way alerts your security team.', style: t.text.body(color: t.muted)),
-          const SizedBox(height: 18),
-          NTextField(label: 'Work email', controller: _identifier, keyboardType: TextInputType.emailAddress),
-          const SizedBox(height: 12),
-          NTextField(label: 'Recovery code', controller: _code, inputFormatters: [LengthLimitingTextInputFormatter(20)]),
-          const SizedBox(height: 14),
-          NButton(label: 'Sign in', variant: NButtonVariant.accent, busy: _busy, onPressed: () => _run(() => _session.recover(_identifier.text, _code.text))),
-          TextButton(
-            onPressed: () => setState(() => _step = !_emailCodes && _passwordOn ? _Step.password : _Step.identifier),
+
+    if (_mode == _AuthMode.recovery) {
+      children.addAll([
+        Text('Recovery code', style: t.text.heading(size: 28)),
+        const SizedBox(height: 4),
+        Text('Each recovery code works once. Signing in this way alerts your security team.', style: t.text.body(color: t.muted)),
+        const SizedBox(height: 18),
+        NTextField(
+          label: 'Work email',
+          controller: _identifier,
+          keyboardType: TextInputType.emailAddress,
+          autofillHints: const [AutofillHints.email, AutofillHints.username],
+        ),
+        const SizedBox(height: 12),
+        NTextField(
+          label: 'Recovery code',
+          controller: _code,
+          inputFormatters: [LengthLimitingTextInputFormatter(20)],
+          autofocus: true,
+          onSubmitted: (_) => _run(() => _session.recover(_identifier.text.trim(), _code.text.trim())),
+        ),
+        const SizedBox(height: 14),
+        NButton(
+          label: 'Sign in with recovery code',
+          variant: NButtonVariant.accent,
+          busy: _busy,
+          onPressed: () => _run(() => _session.recover(_identifier.text.trim(), _code.text.trim())),
+        ),
+        const SizedBox(height: 10),
+        Center(
+          child: TextButton(
+            onPressed: () => setState(() {
+              _mode = _AuthMode.password;
+              _error = null;
+            }),
             child: Text('Back to sign in', style: t.text.caption(color: t.ink)),
           ),
-        ]);
+        ),
+      ]);
+    } else {
+      // Unified Main Login (Password & OTP seamlessly together)
+      children.addAll([
+        ..._setupBanner(),
+        Text('Sign in', style: t.text.heading(size: 28)),
+        const SizedBox(height: 4),
+        Text('Welcome back! Enter your work credentials to access your account.', style: t.text.body(color: t.muted)),
+        const SizedBox(height: 16),
+
+        // Clean Segmented Mode Selector
+        Container(
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: t.pillTrack,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() {
+                    _mode = _AuthMode.password;
+                    _error = null;
+                  }),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: _mode == _AuthMode.password ? t.card : Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: _mode == _AuthMode.password
+                          ? [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4, offset: const Offset(0, 1))]
+                          : null,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.password_rounded, size: 16, color: _mode == _AuthMode.password ? t.ink : t.muted),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Password',
+                          style: t.text.caption(color: _mode == _AuthMode.password ? t.ink : t.muted).copyWith(
+                                fontWeight: _mode == _AuthMode.password ? FontWeight.w600 : FontWeight.normal,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() {
+                    _mode = _AuthMode.otp;
+                    _error = null;
+                  }),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: _mode == _AuthMode.otp ? t.card : Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: _mode == _AuthMode.otp
+                          ? [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4, offset: const Offset(0, 1))]
+                          : null,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.mail_outline_rounded, size: 16, color: _mode == _AuthMode.otp ? t.ink : t.muted),
+                        const SizedBox(width: 6),
+                        Text(
+                          'One-time OTP',
+                          style: t.text.caption(color: _mode == _AuthMode.otp ? t.ink : t.muted).copyWith(
+                                fontWeight: _mode == _AuthMode.otp ? FontWeight.w600 : FontWeight.normal,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+
+        if (_mode == _AuthMode.password) ...[
+          AutofillGroup(
+            child: Column(
+              children: [
+                NTextField(
+                  label: 'Work email',
+                  controller: _identifier,
+                  keyboardType: TextInputType.emailAddress,
+                  autofillHints: const [AutofillHints.email, AutofillHints.username],
+                  textInputAction: TextInputAction.next,
+                  autofocus: true,
+                ),
+                const SizedBox(height: 12),
+                NTextField(
+                  label: 'Password',
+                  controller: _password,
+                  obscure: _obscurePassword,
+                  autofillHints: const [AutofillHints.password],
+                  textInputAction: TextInputAction.go,
+                  suffix: IconButton(
+                    icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 20, color: t.muted),
+                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                  onSubmitted: (_) => _submitPassword(),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          NButton(
+            label: 'Sign in',
+            variant: NButtonVariant.accent,
+            busy: _busy,
+            onPressed: _submitPassword,
+          ),
+        ] else ...[
+          // OTP Mode
+          if (!_codeSent) ...[
+            AutofillGroup(
+              child: NTextField(
+                label: 'Work email or mobile number',
+                controller: _identifier,
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.email, AutofillHints.telephoneNumber],
+                textInputAction: TextInputAction.go,
+                autofocus: true,
+                onSubmitted: (_) => _sendCode(),
+              ),
+            ),
+            const SizedBox(height: 14),
+            NButton(
+              label: 'Send verification code',
+              icon: Icons.send_rounded,
+              variant: NButtonVariant.accent,
+              busy: _busy,
+              onPressed: _sendCode,
+            ),
+          ] else ...[
+            Text('Check your inbox / phone', style: t.text.title(size: 16)),
+            const SizedBox(height: 4),
+            Text('Code sent to ${_destination ?? _identifier.text}. Enter the 6 digits below.', style: t.text.caption(color: t.muted)),
+            const SizedBox(height: 14),
+            NTextField(
+              label: '6-digit code',
+              controller: _code,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
+              autofillHints: const [AutofillHints.oneTimeCode],
+              autofocus: true,
+              onSubmitted: (_) => _verifyOtp(),
+              onChanged: (v) {
+                if (v.length == 6 && !_busy) _verifyOtp();
+              },
+            ),
+            const SizedBox(height: 14),
+            NButton(
+              label: 'Verify & Sign in',
+              variant: NButtonVariant.accent,
+              busy: _busy,
+              onPressed: _verifyOtp,
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              children: [
+                TextButton(
+                  onPressed: () => setState(() {
+                    _codeSent = false;
+                    _code.clear();
+                  }),
+                  child: Text('Change address/number', style: t.text.caption(color: t.ink)),
+                ),
+                TextButton(
+                  onPressed: _resendIn > 0 || _busy ? null : _sendCode,
+                  child: Text(
+                    _resendIn > 0 ? 'Resend in ${_resendIn}s' : 'Resend code',
+                    style: t.text.caption(color: _resendIn > 0 ? t.muted : t.ink),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+
+        // Single Sign-On (Google / Apple)
+        if (AppConfig.googleClientId.isNotEmpty || AppConfig.appleClientId.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          Row(children: [
+            Expanded(child: Divider(color: t.divider)),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 10), child: Text('or continue with', style: t.text.caption())),
+            Expanded(child: Divider(color: t.divider)),
+          ]),
+          const SizedBox(height: 14),
+        ],
+
+        if (AppConfig.googleClientId.isNotEmpty)
+          Center(
+            child: bridge.googleButton(
+                  clientId: AppConfig.googleClientId,
+                  onToken: (token) => _run(() => _session.google(token)),
+                  onError: () => setState(() => _error = "Google sign-in couldn't start. Use email and password instead."),
+                ) ??
+                const SizedBox.shrink(),
+          ),
+
+        if (AppConfig.appleClientId.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          NButton(
+            label: 'Continue with Apple',
+            icon: Icons.apple,
+            variant: NButtonVariant.secondary,
+            busy: _busy,
+            onPressed: () => _run(() async {
+              final token = await bridge.appleSignIn(AppConfig.appleClientId, AppConfig.appleRedirectUri);
+              if (token == null) throw const ApiException(status: 0, code: 'APPLE_CANCELLED', message: 'Apple sign-in was cancelled.');
+              await _session.apple(token);
+            }),
+          ),
+        ],
+
+        const SizedBox(height: 14),
+        Center(
+          child: TextButton(
+            onPressed: () => setState(() {
+              _mode = _AuthMode.recovery;
+              _error = null;
+            }),
+            child: Text('Lost access? Use a recovery code', style: t.text.caption(color: t.ink)),
+          ),
+        ),
+        Center(
+          child: TextButton(
+            onPressed: () => context.go('/status'),
+            child: Text('Server status', style: t.text.caption()),
+          ),
+        ),
+      ]);
     }
+
     return AuthFrame(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        if (widget.expired && _step == _Step.identifier) ...[
+        if (widget.expired) ...[
           const NBanner(message: 'Your session ended. Sign in again to continue.', tone: NBannerTone.warning),
           const SizedBox(height: 14),
         ],

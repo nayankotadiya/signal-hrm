@@ -107,14 +107,17 @@ class SignalWordmark extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = NTokens.of(context);
     final base = t.text.title(size: size).copyWith(color: t.ink);
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      Text('Signal ', style: base.copyWith(fontWeight: FontWeight.w300)),
-      ShaderMask(
-        blendMode: BlendMode.srcIn,
-        shaderCallback: (r) => LinearGradient(colors: [t.chartStart, t.chartEnd]).createShader(r),
-        child: Text('HRM', style: base.copyWith(fontWeight: FontWeight.w600)),
-      ),
-    ]);
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Text('Signal ', style: base.copyWith(fontWeight: FontWeight.w300)),
+        ShaderMask(
+          blendMode: BlendMode.srcIn,
+          shaderCallback: (r) => LinearGradient(colors: [t.chartStart, t.chartEnd]).createShader(r),
+          child: Text('HRM', style: base.copyWith(fontWeight: FontWeight.w600)),
+        ),
+      ]),
+    );
   }
 }
 

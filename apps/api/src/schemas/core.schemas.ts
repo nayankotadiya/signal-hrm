@@ -27,8 +27,8 @@ export const OrganizationSchema = new Schema(
     settings: {
       attendance: {
         // The user's Phase 4 rules: requirements per action, accuracy limit, server time only.
-        checkIn: { requireLocation: { type: Boolean, default: true }, requireSelfie: { type: Boolean, default: false } },
-        checkOut: { requireLocation: { type: Boolean, default: true }, requireSelfie: { type: Boolean, default: false } },
+        checkIn: { requireLocation: { type: Boolean, default: true }, requireSelfie: { type: Boolean, default: true } },
+        checkOut: { requireLocation: { type: Boolean, default: true }, requireSelfie: { type: Boolean, default: true } },
         maxAccuracyMeters: { type: Number, default: 100 },
         allowRemote: { type: Boolean, default: false },
         gpsRetryLimit: { type: Number, default: 2 },

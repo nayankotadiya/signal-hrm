@@ -130,7 +130,7 @@ Future<void> _expectNoLayoutErrors(WidgetTester tester, AppServices s, Size size
   } finally {
     FlutterError.onError = previous;
   }
-  expect(errors, isEmpty, reason: 'at ${size.width}x${size.height}, text x$textScale:\n${errors.map((e) => e.toString()).join('\n\n')}');
+  expect(errors, isEmpty, reason: 'at ${size.width}x${size.height}, text x$textScale:\n${errors.map((e) => e.exceptionAsString()).join('\n\n')}');
 }
 
 void main() {

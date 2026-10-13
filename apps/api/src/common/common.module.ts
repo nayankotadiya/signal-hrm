@@ -10,6 +10,7 @@ import { ScopeService } from './authz/scope.service';
 import { IdempotencyInterceptor } from './idempotency/idempotency.interceptor';
 import { MailService } from './mail/mail.service';
 import { OrgSettingsService } from './org/org-settings.service';
+import { SmsService } from './sms/sms.service';
 
 @Global()
 @Module({
@@ -29,10 +30,11 @@ import { OrgSettingsService } from './org/org-settings.service';
     ScopeService,
     AuditService,
     MailService,
+    SmsService,
     OrgSettingsService,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
   ],
-  exports: [PermissionsService, ScopeService, AuditService, MailService, OrgSettingsService],
+  exports: [PermissionsService, ScopeService, AuditService, MailService, SmsService, OrgSettingsService],
 })
 export class CommonModule {}

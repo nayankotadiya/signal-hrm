@@ -129,7 +129,8 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     final action = isCheckIn ? 'check-in' : 'check-out';
     final req = jsonMap(jsonMap(today['requirements'])[isCheckIn ? 'checkIn' : 'checkOut']);
     final needLocation = req['requireLocation'] != false;
-    final needSelfie = req['requireSelfie'] == true;
+    // Always enable selfie photo verification for attendance punches
+    final needSelfie = req['requireSelfie'] != false;
 
     final stepTitle = switch (state) {
       'not_checked_in' => 'Step 1: Check In',
@@ -143,6 +144,19 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     setState(() => _problem = null);
     final body = <String, dynamic>{};
     try {
+      // 1. Direct camera selfie verification first so camera opens immediately on button click
+      if (needSelfie) {
+        setState(() => _phase = _Phase.selfie);
+        final locName = jsonMap(today['location'])['name'] as String?;
+        final id = await _takeSelfie(isCheckIn, locName, stepTitle: stepTitle);
+        if (id == null) {
+          setState(() => _phase = _Phase.idle);
+          return;
+        }
+        body['selfieFileId'] = id;
+      }
+
+      // 2. Geolocation verification
       if (needLocation) {
         setState(() => _phase = _Phase.locating);
         try {
@@ -171,16 +185,7 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
           body['accuracyMeters'] = _lastFix!.accuracyMeters;
         }
       }
-      if (needSelfie) {
-        setState(() => _phase = _Phase.selfie);
-        final locName = jsonMap(today['location'])['name'] as String?;
-        final id = await _takeSelfie(isCheckIn, locName, stepTitle: stepTitle);
-        if (id == null) {
-          setState(() => _phase = _Phase.idle);
-          return;
-        }
-        body['selfieFileId'] = id;
-      }
+
       if (exceptionReason != null) body['exceptionReason'] = exceptionReason;
       if (remote) body['remote'] = true;
       if (!mounted) return;
@@ -830,6 +835,17 @@ class _SelfieSheetState extends State<_SelfieSheet> {
   PickedFile? _picked;
   bool _busy = false;
 
+  @override
+  void initState() {
+    super.initState();
+    // Directly open the camera on launch
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _picked == null) {
+        _takePhoto();
+      }
+    });
+  }
+
   Future<void> _takePhoto() async {
     setState(() => _busy = true);
     try {
@@ -881,113 +897,212 @@ class _SelfieSheetState extends State<_SelfieSheet> {
     final isMobile = NBreakpoint.of(context).isMobile;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
-                    height: isMobile ? 210 : 260,
-                    decoration: BoxDecoration(
-                      color: t.pillTrack,
-                      borderRadius: BorderRadius.circular(t.radiusPanel),
-                      border: Border.all(
-                        color: _picked != null ? t.green : t.cardBorder,
-                        width: _picked != null ? 2 : 1,
-                      ),
+          // Step Info Badge & Location
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: t.accent.withValues(alpha: t.isDark ? 0.22 : 0.16),
+                  borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                  border: Border.all(color: t.accent.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.camera_alt_rounded, size: 14, color: t.accent),
+                    const SizedBox(width: 6),
+                    Text(
+                      actionName,
+                      style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.accent),
                     ),
-                    clipBehavior: Clip.antiAlias,
-                    child: _picked != null
-                        ? Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              Image.memory(_picked!.bytes, fit: BoxFit.cover),
-                              Positioned(
-                                top: 12,
-                                right: 12,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                  decoration: BoxDecoration(
-                                    color: t.green,
-                                    borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.check_circle_rounded, size: 14, color: Colors.white),
-                                      const SizedBox(width: 4),
-                                      Text('Photo captured', style: t.text.caption(weight: FontWeight.w600).copyWith(color: Colors.white)),
-                                    ],
-                                  ),
-                                ),
+                  ],
+                ),
+              ),
+              if (widget.locationName != null) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '📍 ${widget.locationName}',
+                    style: t.text.caption().copyWith(color: t.muted),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Camera Viewfinder & Photo Display
+          Container(
+            height: isMobile ? 220 : 270,
+            decoration: BoxDecoration(
+              color: t.pillTrack,
+              borderRadius: BorderRadius.circular(t.radiusPanel),
+              border: Border.all(
+                color: _picked != null ? t.green : t.cardBorder,
+                width: _picked != null ? 2.5 : 1,
+              ),
+              boxShadow: _picked != null
+                  ? [
+                      BoxShadow(
+                        color: t.green.withValues(alpha: 0.2),
+                        blurRadius: 16,
+                        spreadRadius: 2,
+                      ),
+                    ]
+                  : null,
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: _picked != null
+                ? Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.memory(_picked!.bytes, fit: BoxFit.cover),
+                      Positioned(
+                        top: 12,
+                        left: 12,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: t.green,
+                            borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.25),
+                                blurRadius: 6,
                               ),
-                            ],
-                          )
-                        : Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Container(
-                                width: 80,
-                                height: 80,
-                                decoration: BoxDecoration(
-                                  color: t.accent.withValues(alpha: t.isDark ? 0.22 : 0.16),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(Icons.camera_alt_rounded, size: 40, color: t.accent),
-                              ),
-                              const SizedBox(height: 16),
-                              Text('Position face inside frame', style: t.text.title(size: 16)),
-                              const SizedBox(height: 4),
-                              Text('Look straight at the camera with clear lighting', style: t.text.caption()),
                             ],
                           ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.check_circle_rounded, size: 15, color: Colors.white),
+                              SizedBox(width: 5),
+                              Text(
+                                'Photo Captured',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 74,
+                        height: 74,
+                        decoration: BoxDecoration(
+                          color: t.accent.withValues(alpha: t.isDark ? 0.25 : 0.16),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: t.accent.withValues(alpha: 0.4), width: 2),
+                        ),
+                        child: Center(
+                          child: _busy
+                              ? SizedBox(
+                                  width: 32,
+                                  height: 32,
+                                  child: CircularProgressIndicator(strokeWidth: 2.5, color: t.accent),
+                                )
+                              : Icon(Icons.camera_alt_rounded, size: 36, color: t.accent),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        _busy ? 'Opening camera…' : 'Capture Attendance Selfie',
+                        style: t.text.title(size: 16),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Direct front camera photo verification',
+                        style: t.text.caption(color: t.muted),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  if (_picked == null) ...[
-                    NButton(
-                      label: 'Take live selfie',
-                      icon: Icons.camera_alt_rounded,
-                      variant: NButtonVariant.accent,
-                      busy: _busy,
-                      onPressed: _takePhoto,
-                    ),
-                    const SizedBox(height: 8),
-                    NButton(
-                      label: 'Use demo selfie photo',
-                      icon: Icons.auto_awesome_rounded,
-                      variant: NButtonVariant.secondary,
-                      onPressed: _useDemoPhoto,
-                    ),
-                  ] else ...[
-                    NButton(
-                      label: 'Retake photo',
-                      icon: Icons.refresh_rounded,
-                      variant: NButtonVariant.secondary,
-                      onPressed: () => setState(() => _picked = null),
-                    ),
-                  ],
-                  if (widget.locationName != null) ...[
-                    const SizedBox(height: 12),
-                    NBanner(
-                      tone: NBannerTone.info,
-                      message: 'Work location: ${widget.locationName}',
-                    ),
-                  ],
-                ],
-              ),
+          ),
+          const SizedBox(height: 16),
+
+          // Actions: Direct capture when empty, or Side-by-side Retake + TICK BUTTON when photo is clicked
+          if (_picked == null) ...[
+            NButton(
+              label: 'Click / Open Camera',
+              icon: Icons.camera_alt_rounded,
+              variant: NButtonVariant.accent,
+              busy: _busy,
+              onPressed: _takePhoto,
             ),
-          ),
-          const SizedBox(height: 12),
-          NButton(
-            label: 'Confirm $actionName',
-            icon: widget.isCheckIn ? Icons.login_rounded : Icons.logout_rounded,
-            variant: NButtonVariant.accent,
-            onPressed: _picked == null ? null : () => Navigator.of(context).pop(_picked),
-          ),
+            const SizedBox(height: 8),
+            NButton(
+              label: 'Use demo selfie photo',
+              icon: Icons.auto_awesome_rounded,
+              variant: NButtonVariant.secondary,
+              onPressed: _useDemoPhoto,
+            ),
+          ] else ...[
+            // Side-by-side action bar: Retake on the left, TICK BUTTON (✓ Confirm & Continue) on the right
+            Row(
+              children: [
+                Expanded(
+                  flex: 1,
+                  child: NButton(
+                    label: 'Retake',
+                    icon: Icons.refresh_rounded,
+                    variant: NButtonVariant.secondary,
+                    onPressed: () {
+                      setState(() => _picked = null);
+                      _takePhoto();
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                      boxShadow: [
+                        BoxShadow(
+                          color: t.green.withValues(alpha: 0.35),
+                          blurRadius: 12,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: t.green,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                        ),
+                      ),
+                      icon: const Icon(Icons.check_circle_rounded, size: 20, color: Colors.white),
+                      label: Text(
+                        '✓ Confirm & Continue',
+                        style: t.text.body(weight: FontWeight.w700, color: Colors.white),
+                      ),
+                      onPressed: () => Navigator.of(context).pop(_picked),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

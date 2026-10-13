@@ -65,6 +65,14 @@ export const envSchema = z
     SMTP_SECURE: bool.default(false),
     MAIL_FROM: z.string().default('Signal HRM <no-reply@localhost>'),
 
+    // SMS (Twilio / Fast2SMS / Custom HTTP Gateway). Without configuration, development logs OTP to console.
+    TWILIO_ACCOUNT_SID: optionalString,
+    TWILIO_AUTH_TOKEN: optionalString,
+    TWILIO_FROM_PHONE: optionalString,
+    FAST2SMS_API_KEY: optionalString,
+    SMS_GATEWAY_URL: optionalString,
+    SMS_API_KEY: optionalString,
+
     // Backups
     BACKUP_ENABLED: bool.default(false),
     BACKUP_CRON: z.string().default('30 2 * * *'),

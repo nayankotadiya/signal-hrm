@@ -40,6 +40,8 @@ export class SetupController {
       setupAvailable: needsSetup && !!this.env.SETUP_TOKEN,
       passwordLogin: this.env.PASSWORD_LOGIN,
       emailCodes: !!this.env.SMTP_HOST || this.env.APP_ENV === 'development',
+      smsCodes: !!this.env.TWILIO_ACCOUNT_SID || !!this.env.FAST2SMS_API_KEY || !!this.env.SMS_GATEWAY_URL || this.env.APP_ENV === 'development',
+      googleAuth: this.env.GOOGLE_CLIENT_IDS.length > 0,
     };
   }
 

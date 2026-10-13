@@ -9,6 +9,7 @@ import { hashPassword, hmac, numericCode, passwordProblem, randomToken, safeEqua
 import { ApiError } from '../../common/errors/api-error';
 import { MailService } from '../../common/mail/mail.service';
 import { OrgSettingsService } from '../../common/org/org-settings.service';
+import { SmsService } from '../../common/sms/sms.service';
 import { APP_CONFIG } from '../../config/config.module';
 import { AppEnv, secretOf } from '../../config/env.schema';
 import { InjectModel, serialize } from '../../database/model';
@@ -40,6 +41,7 @@ export class AuthService {
     @Inject(APP_CONFIG) private readonly env: AppEnv,
     private readonly sessions: SessionService,
     private readonly mail: MailService,
+    private readonly sms: SmsService,
     private readonly audit: AuditService,
     private readonly perms: PermissionsService,
     private readonly orgSettings: OrgSettingsService,
@@ -85,7 +87,26 @@ export class AuthService {
       return generic;
     }
     if (channel === 'phone') {
-      throw new ApiError(HttpStatus.NOT_IMPLEMENTED, 'PHONE_OTP_NOT_CONFIGURED', 'Phone sign-in is not set up. Use your email address.');
+      if (!this.sms.canSend) {
+        throw new ApiError(HttpStatus.CONFLICT, 'SMS_NOT_CONFIGURED', "SMS codes aren't set up on this server yet. Sign in with your password or email.");
+      }
+      const code = numericCode(6);
+      await this.otps.create({
+        organizationId: user?.organizationId ?? invitation?.organizationId,
+        channel,
+        identifier: value,
+        purpose,
+        codeHash: this.codeHash(value, code),
+        expiresAt: new Date(Date.now() + this.env.OTP_TTL_SECONDS * 1000),
+        ip,
+      });
+      const minutes = Math.round(this.env.OTP_TTL_SECONDS / 60);
+      await this.sms.send({
+        to: value,
+        message: `Your Signal HRM ${purpose === 'reauth' ? 'confirmation' : 'sign-in'} code is ${code}. Valid for ${minutes} minutes.`,
+      });
+      if (this.env.OTP_DEV_ECHO && this.env.APP_ENV === 'development') this.logger.warn(`[dev] OTP for ${value}: ${code}`);
+      return generic;
     }
 
     if (!this.mail.canSend) {

@@ -111,8 +111,8 @@ export class AttendanceService implements OnModuleInit {
       shift: shift ? { ...serialize(shift), lengthMinutes: shiftLength(shift) } : null,
       location: location ? { id: String(location._id), name: location.name, latitude: location.latitude, longitude: location.longitude, radiusMeters: location.radiusMeters } : null,
       requirements: {
-        checkIn: { requireLocation: settings.checkIn?.requireLocation ?? true, requireSelfie: settings.checkIn?.requireSelfie ?? false },
-        checkOut: { requireLocation: settings.checkOut?.requireLocation ?? true, requireSelfie: settings.checkOut?.requireSelfie ?? false },
+        checkIn: { requireLocation: settings.checkIn?.requireLocation ?? true, requireSelfie: settings.checkIn?.requireSelfie ?? true },
+        checkOut: { requireLocation: settings.checkOut?.requireLocation ?? true, requireSelfie: settings.checkOut?.requireSelfie ?? true },
         maxAccuracyMeters: settings.maxAccuracyMeters ?? 100,
         allowRemote: settings.allowRemote ?? false,
         gpsRetryLimit: settings.gpsRetryLimit ?? 2,

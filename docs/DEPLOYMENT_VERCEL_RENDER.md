@@ -135,8 +135,103 @@ Signal HRM features enterprise automated backups:
 
 ---
 
-## 8. Verification & Live Access
+## 8. Live Service Configuration Guide (Google Drive, OAuth, SMTP, SMS OTP)
+
+### A. Google Drive Cloud Storage
+1. Open [Google Cloud Console](https://console.cloud.google.com/).
+2. Create or select your project.
+3. Search and enable **Google Drive API**.
+4. Navigate to **IAM & Admin → Service Accounts** → Click **Create Service Account**.
+   - Name: `signal-hrm-storage`
+   - Role: Not strictly required on the project level since drive permissions are handled per folder.
+5. Click on the created service account → **Keys** tab → **Add Key → Create new key (JSON)**. Download the JSON key file.
+6. Open [Google Drive](https://drive.google.com):
+   - Create a dedicated folder (e.g., `Signal HRM Cloud Storage`).
+   - Share this folder with the service account email (e.g., `signal-hrm-storage@your-project.iam.gserviceaccount.com`) with **Editor** permissions.
+   - Copy the folder ID from the browser URL: `https://drive.google.com/drive/folders/<FOLDER_ID>`.
+7. Configure in `.env` / Render environment:
+   ```env
+   STORAGE_PROVIDER=google_drive
+   GOOGLE_DRIVE_CREDENTIALS_JSON={"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n","client_email":"..."}
+   GOOGLE_DRIVE_ROOT_FOLDER_ID=<FOLDER_ID>
+   ```
+
+### B. Google Sign-In (OAuth 2.0)
+1. In Google Cloud Console, navigate to **APIs & Services → Credentials**.
+2. Click **Create Credentials → OAuth client ID**.
+3. Application type: **Web application**.
+4. Authorized JavaScript origins:
+   - Development: `http://localhost:8080`, `http://localhost:5000`
+   - Production: `https://your-domain.vercel.app`, `https://your-custom-domain.com`
+5. Copy the generated **Client ID** (e.g. `123456789-xxxxxx.apps.googleusercontent.com`).
+6. Configure in Backend `.env` / Render:
+   ```env
+   GOOGLE_CLIENT_IDS=123456789-xxxxxx.apps.googleusercontent.com
+   ```
+7. Configure in Frontend Flutter Web build / Vercel:
+   ```bash
+   flutter build web --release --dart-define=GOOGLE_CLIENT_ID=123456789-xxxxxx.apps.googleusercontent.com
+   ```
+
+### C. Live Email OTP Delivery (SMTP)
+Configure real outbound email delivery for employee invites and 6-digit email OTPs:
+- **Gmail / Google Workspace (Recommended for quick start):**
+  1. Turn on 2-Step Verification on your Google Account.
+  2. Generate an **App Password** at `myaccount.google.com/apppasswords` (Name: `Signal HRM`).
+  3. Configure in `.env`:
+     ```env
+     SMTP_HOST=smtp.gmail.com
+     SMTP_PORT=587
+     SMTP_USER=your-email@yourdomain.com
+     SMTP_PASS=your-16-char-app-password
+     SMTP_SECURE=false
+     MAIL_FROM=Signal HRM <your-email@yourdomain.com>
+     ```
+- **SendGrid / Amazon SES / Postmark:**
+  ```env
+  SMTP_HOST=smtp.sendgrid.net
+  SMTP_PORT=587
+  SMTP_USER=apikey
+  SMTP_PASS=your_sendgrid_api_key
+  SMTP_SECURE=false
+  MAIL_FROM=Signal HRM <support@yourdomain.com>
+  ```
+
+### D. Live SMS OTP Delivery
+Signal HRM supports real SMS delivery to employee mobile phones:
+- **Twilio (International & US/UK):**
+  ```env
+  TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  TWILIO_FROM_PHONE=+1234567890
+  ```
+- **Fast2SMS (India OTP Route - Quick & Cost-Effective):**
+  1. Create an account on [Fast2SMS](https://www.fast2sms.com/).
+  2. Copy your API Key from **Dev API**.
+  3. Configure in `.env`:
+     ```env
+     FAST2SMS_API_KEY=your_fast2sms_api_key
+     ```
+- **Custom HTTP SMS Gateway:**
+  ```env
+  SMS_GATEWAY_URL=https://api.custom-sms.com/send?to={{to}}&msg={{message}}
+  SMS_API_KEY=your_custom_key
+  ```
+
+---
+
+## 9. Unified Single Login Screen
+The login screen has been streamlined into a single unified card:
+- **Default Tab:** Direct **Work Email + Password** sign-in with password toggle.
+- **One-time OTP Tab:** Switch with 1-click on the same card without navigating away. Supports Email OTP and Phone SMS OTP.
+- **Google Sign-In:** One-click OAuth authentication button directly under the sign-in form.
+- **Emergency Recovery:** Direct inline link to enter 10-character offline emergency recovery codes.
+- **No Double Screen Jump:** First-time setup banner appears non-intrusively without abrupt page redirects.
+
+---
+
+## 10. Verification & Live Access
 
 1. Open your Vercel deployment URL (e.g. `https://your-app.vercel.app`).
-2. Enter your email to receive an OTP code (or sign in using recovery code / dev echo if configured).
-3. The dashboard setup checklist will guide you through confirming that your MongoDB Atlas database, Redis cache, Google Drive storage, and attendance/work systems are 100% operational.
+2. Log in using your email/password or Google account or recovery code.
+3. The dashboard setup checklist verifies your MongoDB Atlas database, Redis cache, Google Drive storage, and attendance systems.
