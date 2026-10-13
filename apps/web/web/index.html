@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- Flutter replaces $FLUTTER_BASE_HREF at build time (flutter build web --base-href /). -->
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Signal HRM: People • Work • Time • Operations">
+  <meta name="theme-color" content="#DCD2F4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141A33" media="(prefers-color-scheme: dark)">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Signal HRM">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+  <title>Signal HRM</title>
+  <style>
+    /* Animated splash in the N UI gradient, shown while the app downloads. It fades out on
+       Flutter's first frame, and the app's own splash continues the same animation. */
+    :root {
+      --ink: #0F1115; --muted: #5F6570; --track: rgba(15, 17, 21, .10);
+      --bg: linear-gradient(135deg, #BCD6F6, #DCD2F4 22%, #CDF2EC 50%, #F4F8C2 85%);
+      --glow: rgba(108, 92, 231, .35);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #EDEFF5; --muted: #A3A9B6; --track: rgba(237, 239, 245, .12);
+        --bg: linear-gradient(135deg, #141A33, #1B1A3A 30%, #10282B 65%, #232B16);
+        --glow: rgba(20, 184, 166, .40);
+      }
+    }
+    html, body { margin: 0; height: 100%; }
+    body { background: var(--bg); background-size: 200% 200%; animation: drift 14s ease-in-out infinite alternate; }
+
+    #splash { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+              font-family: system-ui, "Segoe UI", Roboto, sans-serif; color: var(--ink); transition: opacity .35s ease, transform .35s ease; }
+    #splash.leaving { opacity: 0; transform: scale(1.03); }
+
+    /* The mark: a gradient disc with a waveform, and rings that ripple outward like a signal. */
+    .mark { position: relative; width: 64px; height: 64px; animation: pop .7s cubic-bezier(.2, .8, .2, 1) both; }
+    .disc { position: absolute; inset: 0; border-radius: 50%; background: linear-gradient(135deg, #6C5CE7, #14B8A6);
+            box-shadow: 0 10px 40px var(--glow); display: flex; align-items: center; justify-content: center; gap: 3px;
+            animation: breathe 2.4s ease-in-out infinite; }
+    .disc i { display: block; width: 4px; border-radius: 2px; background: #fff; animation: wave 1.1s ease-in-out infinite; }
+    .disc i:nth-child(1) { height: 12px; animation-delay: -.40s; }
+    .disc i:nth-child(2) { height: 22px; animation-delay: -.25s; }
+    .disc i:nth-child(3) { height: 30px; animation-delay: -.10s; }
+    .disc i:nth-child(4) { height: 22px; animation-delay: -.55s; }
+    .disc i:nth-child(5) { height: 12px; animation-delay: -.70s; }
+    .ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid #14B8A6; opacity: 0; animation: ripple 2.4s cubic-bezier(.2, .8, .2, 1) infinite; }
+    .ring:nth-child(2) { animation-delay: .8s; border-color: #6C5CE7; }
+    .ring:nth-child(3) { animation-delay: 1.6s; }
+
+    .word { font-size: 28px; font-weight: 300; letter-spacing: -0.02em; animation: rise .8s .15s cubic-bezier(.2, .8, .2, 1) both; }
+    .word b { font-weight: 650; background: linear-gradient(90deg, #6C5CE7, #14B8A6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .tag { margin-top: -14px; font-size: 13px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; animation: rise .8s .3s cubic-bezier(.2, .8, .2, 1) both; }
+    .bar { width: 160px; height: 4px; border-radius: 4px; background: var(--track); overflow: hidden; animation: rise .8s .45s cubic-bezier(.2, .8, .2, 1) both; }
+    .bar::after { content: ""; display: block; width: 40%; height: 100%; border-radius: 4px; background: linear-gradient(90deg, #6C5CE7, #14B8A6);
+                  animation: slide 1.3s cubic-bezier(.6, 0, .4, 1) infinite; }
+
+    @keyframes drift { from { background-position: 0% 30%; } to { background-position: 100% 70%; } }
+    @keyframes pop { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
+    @keyframes breathe { 50% { transform: scale(1.06); } }
+    @keyframes wave { 50% { transform: scaleY(.45); } }
+    @keyframes ripple { 0% { opacity: .7; transform: scale(1); } 100% { opacity: 0; transform: scale(2.4); } }
+    @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+    @keyframes slide { from { transform: translateX(-110%); } to { transform: translateX(260%); } }
+
+    @media (prefers-reduced-motion: reduce) {
+      body, .mark, .disc, .disc i, .ring, .word, .tag, .bar, .bar::after { animation: none !important; }
+      .ring { display: none; }
+      #splash { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="splash" role="status" aria-label="Loading Signal HRM">
+    <div class="mark"><span class="ring"></span><span class="ring"></span><span class="ring"></span><div class="disc"><i></i><i></i><i></i><i></i><i></i></div></div>
+    <div class="word">Signal <b>HRM</b></div>
+    <div class="tag">People · Work · Time</div>
+    <div class="bar"></div>
+  </div>
+  <noscript>Signal HRM needs JavaScript to run.</noscript>
+  <!-- External file (not inline) so the Content-Security-Policy needs no 'unsafe-inline' for scripts. -->
+  <script src="splash.js"></script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

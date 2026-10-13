@@ -1,0 +1,27 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "if [ ! -d \"flutter\" ]; then git clone -b stable --depth 1 https://github.com/flutter/flutter.git; fi && ./flutter/bin/flutter doctor && cd packages/n_ui && ../../flutter/bin/flutter pub get && cd ../../apps/web && ../../flutter/bin/flutter pub get && ../../flutter/bin/flutter build web --release --no-web-resources-cdn --dart-define=APP_ENV=production",
+  "outputDirectory": "apps/web/build/web",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+      ]
+    },
+    {
+      "source": "/(assets|canvaskit|icons)/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=604800, immutable" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+# Production on the Hostinger VPS. MongoDB is Atlas (MONGODB_URI in api.env); Redis runs here.
+#   docker compose -f infra/docker-compose.prod.yml --env-file infra/prod.env up -d --build
+services:
+  api:
+    build: { context: ../apps/api }
+    restart: unless-stopped
+    env_file: [../apps/api/.env.production]
+    environment:
+      REDIS_URL: redis://redis:6379
+      TRUST_PROXY: "1"
+    volumes:
+      - api-data:/var/lib/signal-hrm
+    depends_on: [redis]
+    expose: ["3000"]
+  web:
+    build: { context: .., dockerfile: apps/web/Dockerfile, args: { APP_ENV: production } }
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in infra/prod.env}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [api]
+  redis:
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes: [redis-data:/data]
+volumes:
+  api-data:
+  caddy-data:
+  caddy-config:
+  redis-data:

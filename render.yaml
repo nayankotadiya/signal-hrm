@@ -1,0 +1,63 @@
+services:
+  - type: web
+    name: signal-hrm-api
+    runtime: node
+    plan: starter
+    region: oregon
+    rootDir: apps/api
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/v1/health/live
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20.12.0
+      - key: APP_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: API_PREFIX
+        value: api
+      - key: TRUST_PROXY
+        value: "1"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAME_SITE
+        value: none
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB_NAME
+        value: signal_hrm_prod
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: signal-hrm-redis
+          property: connectionString
+      - key: CORS_ORIGINS
+        sync: false
+      - key: PUBLIC_WEB_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: OTP_PEPPER
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: OTP_DEV_ECHO
+        value: "false"
+      - key: STORAGE_PROVIDER
+        value: "google_drive"
+      - key: GOOGLE_DRIVE_CREDENTIALS_JSON
+        sync: false
+      - key: GOOGLE_DRIVE_ROOT_FOLDER_ID
+        sync: false
+      - key: MONGODB_STORAGE_LIMIT_MB
+        value: "512"
+      - key: BACKUP_ENABLED
+        value: "true"
+
+  - type: redis
+    name: signal-hrm-redis
+    plan: free
+    region: oregon
+    ipAllowList: []

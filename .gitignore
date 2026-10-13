@@ -1,0 +1,39 @@
+# Node / API
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+coverage/
+**/coverage/
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+*.tsbuildinfo
+
+# Flutter / Dart
+.dart_tool/
+**/.dart_tool/
+build/
+**/build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+pubspec.lock.bak
+apps/web/lib/l10n/gen/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Flutter SDK downloaded by the Vercel build
+.flutter-sdk/
+# Local API storage, backups and runtime data
+var/
+**/var/
+

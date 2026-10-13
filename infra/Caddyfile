@@ -1,0 +1,39 @@
+# Signal HRM — one origin for the PWA and the API (the refresh cookie stays first-party).
+# Set SITE_ADDRESS (e.g. hrm.bulletproofbrands.in) in the environment; Caddy obtains TLS automatically.
+{$SITE_ADDRESS:localhost} {
+	encode zstd gzip
+
+	# API and realtime (socket.io on /ws)
+	handle /api/* {
+		reverse_proxy api:3000 {
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+	handle /ws* {
+		reverse_proxy api:3000
+	}
+
+	# The Flutter PWA. Unknown paths fall back to index.html for deep links.
+	handle {
+		root * /srv/www
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		Permissions-Policy "geolocation=(self), camera=(self), microphone=(self), payment=()"
+		# Google / Apple sign-in scripts are allowed only because those buttons exist; remove them if unused.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://accounts.google.com/gsi/client https://appleid.cdn-apple.com; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' wss: https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/ https://appleid.apple.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self' https://appleid.apple.com; frame-ancestors 'none'"
+		-Server
+	}
+
+	# Never cache the app shell or the service worker; hashed assets can be cached long.
+	@nocache path / /index.html /flutter_service_worker.js /flutter_bootstrap.js /version.json /manifest.json
+	header @nocache Cache-Control "no-cache"
+	@assets path /assets/* /canvaskit/* /icons/*
+	header @assets Cache-Control "public, max-age=604800"
+}

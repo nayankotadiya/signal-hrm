@@ -1,0 +1,36 @@
+name: signal_hrm_web
+description: "Signal HRM: People • Work • Time • Operations. Flutter Web PWA built on N UI."
+version: 0.1.0+1
+publish_to: none
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+  flutter: ">=3.27.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  flutter_web_plugins:
+    sdk: flutter
+  n_ui:
+    path: ../../packages/n_ui
+  go_router: ">=14.6.0 <18.0.0"
+  http: ">=1.2.0 <2.0.0"
+  http_parser: ">=4.0.0 <5.0.0"
+  intl: any
+  web: ">=1.1.0 <2.0.0"
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ">=4.0.0 <7.0.0"
+
+flutter:
+  uses-material-design: true
+  generate: true
+  assets:
+    # Recorded responses from the real API with the demo seed data; used only with --dart-define=DEMO=true.
+    - assets/demo/fixtures.json
+    - assets/demo/selfie.jpg

@@ -1,0 +1,18 @@
+# Local development data stores. Staging and production use MongoDB Atlas (one database per
+# environment) and the VPS Redis; never point development at them.
+#   docker compose -f infra/docker-compose.dev.yml up -d
+services:
+  mongo:
+    image: mongo:7.0
+    restart: unless-stopped
+    ports: ["27017:27017"]
+    volumes: [mongo-data:/data/db]
+  redis:
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes: [redis-data:/data]
+volumes:
+  mongo-data:
+  redis-data:
