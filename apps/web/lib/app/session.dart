@@ -110,10 +110,12 @@ class SessionController extends ChangeNotifier {
     return OtpSent(destination: '${j['destination'] ?? identifier}', resendAfterSeconds: (j['resendAfterSeconds'] as num?)?.toInt() ?? 60);
   }
 
-  Future<void> verifyOtp(String identifier, String code) async => _signedIn(await api.post('/auth/otp/verify', body: {'identifier': identifier.trim(), 'code': code.trim(), 'deviceName': 'Web browser'}));
+  Future<void> verifyOtp(String identifier, String code, {bool rememberMe = true}) async =>
+      _signedIn(await api.post('/auth/otp/verify', body: {'identifier': identifier.trim(), 'code': code.trim(), 'deviceName': 'Web browser', 'rememberMe': rememberMe}));
   Future<void> google(String idToken) async => _signedIn(await api.post('/auth/google', body: {'idToken': idToken, 'deviceName': 'Web browser'}));
   Future<void> apple(String idToken) async => _signedIn(await api.post('/auth/apple', body: {'idToken': idToken, 'deviceName': 'Web browser'}));
-  Future<void> password(String identifier, String password) async => _signedIn(await api.post('/auth/password', body: {'identifier': identifier.trim(), 'password': password}));
+  Future<void> password(String identifier, String password, {bool rememberMe = true}) async =>
+      _signedIn(await api.post('/auth/password', body: {'identifier': identifier.trim(), 'password': password, 'rememberMe': rememberMe}));
   Future<void> acceptInvitation(String token, String code) async => _signedIn(await api.post('/auth/invitations/accept', body: {'token': token, 'code': code.trim()}));
   Future<void> recover(String identifier, String code) async => _signedIn(await api.post('/auth/recover', body: {'identifier': identifier.trim(), 'recoveryCode': code.trim()}));
 

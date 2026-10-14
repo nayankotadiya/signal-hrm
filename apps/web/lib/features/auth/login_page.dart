@@ -79,6 +79,7 @@ class _LoginPageState extends State<LoginPage> {
   final _password = TextEditingController();
   bool _obscurePassword = true;
   bool _codeSent = false;
+  bool _keepSignedIn = true;
   String? _error;
   String? _destination;
   bool _busy = false;
@@ -93,6 +94,14 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
+    final savedEmail = bridge.readLocal('shrm_remembered_email');
+    if (savedEmail != null && savedEmail.isNotEmpty) {
+      _identifier.text = savedEmail;
+    }
+    final savedKeep = bridge.readLocal('shrm_keep_signed_in');
+    if (savedKeep != null) {
+      _keepSignedIn = savedKeep == '1' || savedKeep == 'true';
+    }
     if (!AppConfig.passwordLogin) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         try {
@@ -100,6 +109,16 @@ class _LoginPageState extends State<LoginPage> {
           if (mounted) setState(() => _server = s);
         } catch (_) {}
       });
+    }
+  }
+
+  void _persistRememberPreference(String email) {
+    if (_keepSignedIn) {
+      bridge.writeLocal('shrm_remembered_email', email);
+      bridge.writeLocal('shrm_keep_signed_in', 'true');
+    } else {
+      bridge.writeLocal('shrm_remembered_email', null);
+      bridge.writeLocal('shrm_keep_signed_in', 'false');
     }
   }
 
@@ -158,7 +177,10 @@ class _LoginPageState extends State<LoginPage> {
       setState(() => _error = 'Enter your password.');
       return;
     }
-    await _run(() => _session.password(id, pwd));
+    await _run(() async {
+      await _session.password(id, pwd, rememberMe: _keepSignedIn);
+      _persistRememberPreference(id);
+    });
   }
 
   Future<void> _sendCode() async {
@@ -183,11 +205,46 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _verifyOtp() async {
     final code = _code.text.trim();
+    final id = _identifier.text.trim();
     if (!RegExp(r'^\d{6}$').hasMatch(code)) {
       setState(() => _error = 'Enter the 6-digit code.');
       return;
     }
-    await _run(() => _session.verifyOtp(_identifier.text.trim(), code));
+    await _run(() async {
+      await _session.verifyOtp(id, code, rememberMe: _keepSignedIn);
+      _persistRememberPreference(id);
+    });
+  }
+
+  Widget _buildKeepSignedInRow(NTokens t) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: () => setState(() => _keepSignedIn = !_keepSignedIn),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: Checkbox(
+                value: _keepSignedIn,
+                onChanged: (v) => setState(() => _keepSignedIn = v ?? true),
+                activeColor: t.accent,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Keep me signed in',
+              style: t.text.caption(color: t.ink).copyWith(fontSize: 13, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -363,7 +420,24 @@ class _LoginPageState extends State<LoginPage> {
               ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              _buildKeepSignedInRow(t),
+              TextButton(
+                onPressed: () => setState(() {
+                  _mode = _AuthMode.recovery;
+                  _error = null;
+                }),
+                child: Text('Forgot password?', style: t.text.caption(color: t.accent).copyWith(fontSize: 13)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
           NButton(
             label: 'Sign in',
             icon: Icons.arrow_forward_rounded,
@@ -398,6 +472,8 @@ class _LoginPageState extends State<LoginPage> {
             ),
             const SizedBox(height: 6),
             Text('We will send a 6-digit code to verify your identity.', style: t.text.caption(color: t.muted)),
+            const SizedBox(height: 10),
+            Align(alignment: Alignment.centerLeft, child: _buildKeepSignedInRow(t)),
             const SizedBox(height: 14),
             NButton(
               label: 'Send 6-digit verification code',
@@ -457,6 +533,8 @@ class _LoginPageState extends State<LoginPage> {
                 if (v.trim().length == 6 && !_busy) _verifyOtp();
               },
             ),
+            const SizedBox(height: 10),
+            Align(alignment: Alignment.centerLeft, child: _buildKeepSignedInRow(t)),
             const SizedBox(height: 14),
             NButton(
               label: 'Verify Code & Sign In',

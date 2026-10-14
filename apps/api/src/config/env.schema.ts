@@ -7,7 +7,14 @@ const bool = z
 const optionalString = z
   .string()
   .optional()
-  .transform((v) => (v && v.trim().length > 0 ? v.trim() : undefined));
+  .transform((v) => {
+    if (!v) return undefined;
+    let s = v.trim();
+    if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+      s = s.slice(1, -1).trim();
+    }
+    return s.length > 0 ? s : undefined;
+  });
 
 export const envSchema = z
   .object({

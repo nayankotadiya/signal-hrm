@@ -12,9 +12,16 @@ import { AuthService } from './auth.service';
 import { ClientInfo, IssuedSession, REFRESH_COOKIE, SessionService } from './session.service';
 
 const identifier = z.object({ identifier: z.string().min(3).max(120) });
-const verify = identifier.extend({ code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'), deviceName: z.string().max(80).optional() });
+const verify = identifier.extend({
+  code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+  deviceName: z.string().max(80).optional(),
+  rememberMe: z.boolean().optional(),
+});
 const idToken = z.object({ idToken: z.string().min(20).max(5000), deviceName: z.string().max(80).optional() });
-const password = identifier.extend({ password: z.string().min(8).max(200) });
+const password = identifier.extend({
+  password: z.string().min(8).max(200),
+  rememberMe: z.boolean().optional(),
+});
 const accept = z.object({ token: z.string().min(20).max(200), code: z.string().regex(/^\d{6}$/) });
 const recover = identifier.extend({ recoveryCode: z.string().min(6).max(20) });
 const code = z.object({ code: z.string().regex(/^\d{6}$/) });
@@ -35,8 +42,8 @@ export class AuthController {
   ) {}
 
   /** Response body for every successful sign-in. The refresh token goes in an httpOnly cookie. */
-  private async signedIn(res: Response, s: IssuedSession & { user: any }, includeRefresh = false) {
-    this.sessions.setCookie(res, s.refreshToken, 30);
+  private async signedIn(res: Response, s: IssuedSession & { user: any }, includeRefresh = false, rememberMe = true) {
+    this.sessions.setCookie(res, s.refreshToken, rememberMe ? 30 : undefined);
     return {
       accessToken: s.accessToken,
       expiresIn: s.expiresIn,
@@ -62,7 +69,7 @@ export class AuthController {
   @HttpCode(200)
   async verifyOtp(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const b = parse(verify, body);
-    return this.signedIn(res, await this.auth.verifyOtp(b.identifier, b.code, client(req, b.deviceName)), req.header('x-token-in-body') === '1');
+    return this.signedIn(res, await this.auth.verifyOtp(b.identifier, b.code, client(req, b.deviceName)), req.header('x-token-in-body') === '1', b.rememberMe ?? true);
   }
 
   @Public()
@@ -89,7 +96,7 @@ export class AuthController {
   @HttpCode(200)
   async password(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const b = parse(password, body);
-    return this.signedIn(res, await this.auth.password(b.identifier, b.password, client(req)));
+    return this.signedIn(res, await this.auth.password(b.identifier, b.password, client(req)), false, b.rememberMe ?? true);
   }
 
   @Public()

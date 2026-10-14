@@ -24,14 +24,22 @@ export class RedisService implements OnModuleInit, OnApplicationShutdown {
       this.logger.warn('REDIS_URL is not set. Running without Redis (development only).');
       return;
     }
-    this.redis = new Redis(this.env.REDIS_URL, {
-      lazyConnect: false,
-      enableOfflineQueue: false,
-      maxRetriesPerRequest: 1,
-      retryStrategy: (times) => Math.min(times * 500, 10_000),
-    });
-    this.redis.on('ready', () => this.logger.log('Redis ready'));
-    this.redis.on('error', () => undefined); // state is surfaced through health checks; avoid log floods
+    try {
+      const url = this.env.REDIS_URL.trim();
+      this.redis = new Redis(url, {
+        lazyConnect: false,
+        enableOfflineQueue: false,
+        maxRetriesPerRequest: 1,
+        retryStrategy: (times) => Math.min(times * 500, 10_000),
+      });
+      this.redis.on('ready', () => this.logger.log('Redis ready'));
+      this.redis.on('error', (err) => {
+        this.logger.debug(`Redis connection issue: ${err.message}`);
+      });
+    } catch (err) {
+      this.logger.warn(`Failed to connect to Redis (${(err as Error).message}). Continuing without Redis.`);
+      this.redis = undefined;
+    }
   }
 
   async ping(): Promise<void> {

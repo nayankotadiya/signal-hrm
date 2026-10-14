@@ -120,13 +120,13 @@ export class SessionService {
     await this.sessions.updateOne({ _id: sessionId }, { $set: { reauthAt: new Date() } });
   }
 
-  setCookie(res: Response, refreshToken: string, days: number): void {
+  setCookie(res: Response, refreshToken: string, days?: number): void {
     res.cookie(REFRESH_COOKIE, refreshToken, {
       httpOnly: true,
       secure: this.env.COOKIE_SECURE,
       sameSite: this.env.COOKIE_SAME_SITE,
       path: `/${this.env.API_PREFIX}/v1/auth`,
-      maxAge: days * 86400_000,
+      ...(days ? { maxAge: days * 86400_000 } : {}),
     });
   }
 
