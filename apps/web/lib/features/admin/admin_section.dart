@@ -546,22 +546,49 @@ class _UsersTabState extends State<UsersTab> {
   Future<void> _invite() async {
     final r = await showFormSheet<Json>(
       context,
-      title: 'Add a person',
-      subtitle: 'With email set up they get an invitation link. Without it, you give them a temporary password.',
-      initial: const {'role': 'employee'},
-      fields: const [
-        FieldSpec('fullName', 'Full name', required: true),
-        FieldSpec('email', 'Email', kind: FieldKind.email, required: true),
-        FieldSpec('role', 'Role', kind: FieldKind.asyncSelect, loadOptions: Lookups.roles, required: true),
-        FieldSpec('employeeId', 'Link to employee record', kind: FieldKind.asyncSelect, loadOptions: Lookups.employees),
+      title: 'Add User / Create Account',
+      subtitle: 'Create Login ID & password directly, or send an email invitation.',
+      initial: const {'role': 'employee', 'createPassword': true},
+      fields: [
+        const FieldSpec('fullName', 'Full name', required: true),
+        const FieldSpec('email', 'Email (Login ID)', kind: FieldKind.email, required: true),
+        const FieldSpec('role', 'Role', kind: FieldKind.asyncSelect, loadOptions: Lookups.roles, required: true),
+        const FieldSpec('employeeId', 'Link to employee record', kind: FieldKind.asyncSelect, loadOptions: Lookups.employees),
+        const FieldSpec(
+          'createPassword',
+          'Create Password directly',
+          kind: FieldKind.toggle,
+          description: 'User can sign in immediately with email & password without waiting for an email invitation.',
+        ),
+        FieldSpec(
+          'password',
+          'Password',
+          kind: FieldKind.password,
+          visibleWhen: (v) => v['createPassword'] == true,
+          helper: 'Minimum 6 characters. User logs in with email and this password.',
+        ),
       ],
-      submitLabel: 'Add person',
-      successMessage: 'Person added.',
-      submit: (v, key) async => jsonMap(await context.api.post('/users', body: {...v, 'sendInvitation': true}, idempotencyKey: key)),
+      submitLabel: 'Create Account',
+      successMessage: 'Account created.',
+      submit: (v, key) async {
+        final body = Map<String, dynamic>.from(v);
+        final createPwd = body.remove('createPassword') == true;
+        final pwd = body['password']?.toString().trim();
+        if (!createPwd || pwd == null || pwd.isEmpty) {
+          body.remove('password');
+          body['sendInvitation'] = true;
+        } else {
+          body['password'] = pwd;
+          body['sendInvitation'] = false;
+        }
+        return jsonMap(await context.api.post('/users', body: body, idempotencyKey: key));
+      },
     );
     if (r == null || !mounted) return;
     setState(() => _rev++);
-    if (r['invitationSent'] == true) {
+    if (r['hasPassword'] == true) {
+      NToast.of(context).show('Account ready! ${r['email']} can now log in.');
+    } else if (r['invitationSent'] == true) {
       NToast.of(context).show('Invitation emailed to ${r['email']}.');
     } else {
       // No email on this server: activate the account with a temporary password instead.
@@ -660,7 +687,7 @@ class _UsersTabState extends State<UsersTab> {
       Toolbar(children: [
         SizedBox(width: 260, child: NSearchField(hint: 'Search name or email', onChanged: (v) => setState(() => _q = v))),
         NFilterChips<String>(value: _status, onChanged: (v) => setState(() => _status = v), options: const [NOption('', 'All'), NOption('active', 'Active'), NOption('invited', 'Invited'), NOption('suspended', 'Suspended')]),
-        if (me.can('users', 'create', 'organization')) NButton(label: 'Invite', icon: Icons.person_add_rounded, compact: true, variant: NButtonVariant.accent, onPressed: _invite),
+        if (me.can('users', 'create', 'organization')) NButton(label: 'Add User', icon: Icons.person_add_rounded, compact: true, variant: NButtonVariant.accent, onPressed: _invite),
       ]),
       PagedList(
         path: '/users',

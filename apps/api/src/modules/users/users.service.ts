@@ -22,6 +22,7 @@ export const createUserInput = z.object({
   role: z.enum(ROLES).default('employee'),
   employeeId: z.string().optional(),
   sendInvitation: z.boolean().default(true),
+  password: z.string().min(6).max(128).optional(),
 });
 
 const PUBLIC_FIELDS = { passwordHash: 0, googleSub: 0, appleSub: 0 };
@@ -81,13 +82,18 @@ export class UsersService {
       if (!emp) throw notFound('Employee');
       if (emp.userId) throw conflict('EMPLOYEE_HAS_ACCOUNT', 'This employee already has an account.');
     }
+    const hasPassword = Boolean(input.password && input.password.trim().length >= 6);
+    const pwdHash = hasPassword ? hashPassword(input.password!.trim()) : undefined;
     const user = await this.users.create({
       organizationId: ctx.orgOid,
       fullName: input.fullName,
       email: input.email,
       phone: input.phone,
       role: input.role,
-      status: 'invited',
+      status: hasPassword ? 'active' : 'invited',
+      passwordHash: pwdHash,
+      passwordSetAt: hasPassword ? new Date() : undefined,
+      mustChangePassword: false,
       employeeId: input.employeeId ? oid(input.employeeId) : undefined,
       invitedBy: ctx.userOid,
       createdBy: ctx.userOid,
@@ -96,9 +102,17 @@ export class UsersService {
     await this.changes.create({ organizationId: ctx.orgOid, actorId: ctx.userOid, targetUserId: user._id, roleKey: input.role, change: 'role_assigned', after: { role: input.role } });
     await this.audit.record(ctx, { action: 'user.create', resourceType: 'user', resourceId: user._id, changes: { role: { from: null, to: input.role } } });
     let invitation: { link: string } | undefined;
-    // Without email sending, the administrator activates the account with a temporary password instead.
-    if (input.sendInvitation && this.mail.canSend) invitation = await this.invite(ctx, user);
-    return { ...serialize({ ...user.toObject(), passwordHash: undefined }), invitationSent: !!invitation, emailConfigured: this.mail.canSend };
+    if (!hasPassword && input.sendInvitation && this.mail.canSend) {
+      invitation = await this.invite(ctx, user);
+    } else if (hasPassword && user.email && this.mail.canSend && input.sendInvitation) {
+      const org = await this.orgs.findById(ctx.orgOid, { name: 1 }).lean<any>();
+      await this.mail.send({
+        to: user.email,
+        subject: `Your Signal HRM account has been created`,
+        text: `Hello ${user.fullName},\n\nYour account on ${org?.name ?? 'Signal HRM'} has been created.\n\nLogin ID / Email: ${user.email}\nYour password has been set by the administrator.\n\nSign in here: ${this.env.PUBLIC_WEB_URL}/login`,
+      }).catch((e) => this.mail.canSend && new Logger('Users').warn(`Welcome email failed: ${e?.message}`));
+    }
+    return { ...serialize({ ...user.toObject(), passwordHash: undefined }), hasPassword, invitationSent: !!invitation, emailConfigured: this.mail.canSend };
   }
 
   async invite(ctx: Ctx, user: any): Promise<{ link: string }> {

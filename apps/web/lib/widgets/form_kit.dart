@@ -176,6 +176,7 @@ class _FormSheetState<T> extends State<_FormSheet<T>> {
       if (v is num && f.min != null && v < f.min!) _errors[f.key] = 'Must be at least ${f.min}';
       if (v is num && f.max != null && v > f.max!) _errors[f.key] = 'Must be at most ${f.max}';
       if (f.kind == FieldKind.email && v is String && !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(v)) _errors[f.key] = 'Enter a valid email address';
+      if (f.kind == FieldKind.password && v is String && v.isNotEmpty && v.length < 6) _errors[f.key] = 'Must be at least 6 characters';
     }
     return _errors.isEmpty;
   }

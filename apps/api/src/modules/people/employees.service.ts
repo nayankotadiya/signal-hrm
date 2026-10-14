@@ -38,7 +38,10 @@ export const employeeInput = z.object({
   shiftId: optId,
   probation: z.object({ endsOn: z.coerce.date().optional().nullable(), status: z.enum(['none', 'on_probation', 'confirmed', 'extended']).default('none') }).optional(),
   /** Create a sign-in account and send an invitation in the same step. */
-  invite: z.object({ role: z.enum(['employee', 'manager', 'hr', 'admin', 'moderator', 'user']).default('employee') }).optional(),
+  invite: z.object({
+    role: z.enum(['employee', 'manager', 'hr', 'admin', 'moderator', 'user']).default('employee'),
+    password: z.string().min(6).max(128).optional(),
+  }).optional(),
 });
 export const employeeUpdate = employeeInput.partial().omit({ invite: true }).extend({
   status: z.enum(EMPLOYMENT_STATUSES).optional(),
@@ -271,7 +274,14 @@ export class EmployeesService implements OnModuleInit {
     });
     await this.audit.record(ctx, { action: 'employee.create', resourceType: 'employee', resourceId: doc._id, changes: diff(null, rest as any, ['firstName', 'lastName', 'designation', 'departmentId', 'joiningDate']) });
     if (invite && input.contactEmail) {
-      await this.usersSvc.create(ctx, { fullName: `${input.firstName} ${input.lastName}`.trim(), email: input.contactEmail, role: invite.role, employeeId: String(doc._id), sendInvitation: true });
+      await this.usersSvc.create(ctx, {
+        fullName: `${input.firstName} ${input.lastName}`.trim(),
+        email: input.contactEmail,
+        role: invite.role,
+        password: invite.password,
+        employeeId: String(doc._id),
+        sendInvitation: !invite.password,
+      });
     }
     return this.get(ctx, String(doc._id));
   }

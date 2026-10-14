@@ -53,15 +53,40 @@ List<FieldSpec> employeeFields({bool create = false}) => [
       const FieldSpec('probation.status', 'Probation', kind: FieldKind.select, options: [NOption('none', 'None'), NOption('on_probation', 'On probation'), NOption('confirmed', 'Confirmed'), NOption('extended', 'Extended')]),
       const FieldSpec('probation.endsOn', 'Probation ends', kind: FieldKind.date),
       const FieldSpec('employeeCode', 'Employee code', helper: 'Leave empty to number automatically.'),
-      if (create) const FieldSpec('inviteNow', 'Create a sign-in account and send an invitation', kind: FieldKind.toggle),
+      if (create) const FieldSpec('inviteNow', 'Create a sign-in account', kind: FieldKind.toggle),
       if (create) FieldSpec('inviteRole', 'Role', kind: FieldKind.select, options: _inviteRoles, visibleWhen: (v) => v['inviteNow'] == true),
+      if (create)
+        const FieldSpec(
+          'setPassword',
+          'Set Password directly',
+          kind: FieldKind.toggle,
+          visibleWhen: _isInviting,
+          description: 'Employee can sign in immediately with email & password without waiting for an email invitation.',
+        ),
+      if (create)
+        FieldSpec(
+          'password',
+          'Password',
+          kind: FieldKind.password,
+          visibleWhen: (v) => v['inviteNow'] == true && v['setPassword'] == true,
+          helper: 'Minimum 6 characters.',
+        ),
     ];
+
+bool _isInviting(Json v) => v['inviteNow'] == true;
 
 Json employeeBody(Json v) {
   final out = <String, dynamic>{...v}
     ..remove('inviteNow')
-    ..remove('inviteRole');
-  if (v['inviteNow'] == true) out['invite'] = {'role': v['inviteRole'] ?? 'employee'};
+    ..remove('inviteRole')
+    ..remove('setPassword');
+  final pwd = out.remove('password')?.toString().trim();
+  if (v['inviteNow'] == true) {
+    out['invite'] = {
+      'role': v['inviteRole'] ?? 'employee',
+      if (v['setPassword'] == true && pwd != null && pwd.isNotEmpty) 'password': pwd,
+    };
+  }
   return out;
 }
 
@@ -96,7 +121,7 @@ class _DirectoryTabState extends State<DirectoryTab> {
     final r = await showFormSheet<Json>(
       context,
       title: 'Add employee',
-      initial: const {'employmentType': 'full_time', 'inviteNow': true, 'inviteRole': 'employee', 'probation': {'status': 'none'}},
+      initial: const {'employmentType': 'full_time', 'inviteNow': true, 'setPassword': true, 'inviteRole': 'employee', 'probation': {'status': 'none'}},
       fields: employeeFields(create: true),
       successMessage: 'Employee added.',
       submit: (v, key) async => jsonMap(await context.api.post('/employees', body: employeeBody(v), idempotencyKey: key)),
@@ -214,18 +239,49 @@ class _EmployeePageState extends State<EmployeePage> {
   Future<void> _invite(Json e) async {
     final r = await showFormSheet<Json>(
       context,
-      title: 'Invite to sign in',
-      initial: {'email': e['contactEmail'], 'fullName': '${e['firstName']} ${e['lastName'] ?? ''}'.trim(), 'role': 'employee'},
-      fields: const [
-        FieldSpec('fullName', 'Full name', required: true),
-        FieldSpec('email', 'Email', kind: FieldKind.email, required: true),
-        FieldSpec('role', 'Role', kind: FieldKind.select, options: _inviteRoles, required: true),
+      title: 'Create Account / Invite',
+      subtitle: 'Create Login ID & password directly, or send an email invitation.',
+      initial: {'email': e['contactEmail'], 'fullName': '${e['firstName']} ${e['lastName'] ?? ''}'.trim(), 'role': 'employee', 'createPassword': true},
+      fields: [
+        const FieldSpec('fullName', 'Full name', required: true),
+        const FieldSpec('email', 'Email (Login ID)', kind: FieldKind.email, required: true),
+        const FieldSpec('role', 'Role', kind: FieldKind.select, options: _inviteRoles, required: true),
+        const FieldSpec(
+          'createPassword',
+          'Create Password directly',
+          kind: FieldKind.toggle,
+          description: 'Employee can sign in immediately with email & password without waiting for an email invitation.',
+        ),
+        FieldSpec(
+          'password',
+          'Password',
+          kind: FieldKind.password,
+          visibleWhen: (v) => v['createPassword'] == true,
+          helper: 'Minimum 6 characters. Employee logs in with email and this password.',
+        ),
       ],
-      submitLabel: 'Send invitation',
-      successMessage: 'Invitation sent.',
-      submit: (v, key) async => jsonMap(await context.api.post('/users', body: {...v, 'employeeId': widget.id, 'sendInvitation': true}, idempotencyKey: key)),
+      submitLabel: 'Create Account',
+      successMessage: 'Account created.',
+      submit: (v, key) async {
+        final body = Map<String, dynamic>.from(v);
+        final createPwd = body.remove('createPassword') == true;
+        final pwd = body['password']?.toString().trim();
+        if (!createPwd || pwd == null || pwd.isEmpty) {
+          body.remove('password');
+          body['sendInvitation'] = true;
+        } else {
+          body['password'] = pwd;
+          body['sendInvitation'] = false;
+        }
+        return jsonMap(await context.api.post('/users', body: {...body, 'employeeId': widget.id}, idempotencyKey: key));
+      },
     );
-    if (r != null) _view.currentState?.reload();
+    if (r != null) {
+      if (r['hasPassword'] == true && mounted) {
+        NToast.of(context).show('Account ready! Employee can now log in with their email and password.');
+      }
+      _view.currentState?.reload();
+    }
   }
 
   Future<void> _offboard() async {
