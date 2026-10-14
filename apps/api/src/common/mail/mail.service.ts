@@ -19,29 +19,22 @@ export class MailService {
   constructor(@Inject(APP_CONFIG) private readonly env: AppEnv) {
     if (env.SMTP_HOST || env.SMTP_USER) {
       const isGmail = env.SMTP_HOST === 'smtp.gmail.com' || (!env.SMTP_HOST && env.SMTP_USER?.endsWith('@gmail.com'));
-      if (isGmail && env.SMTP_USER && env.SMTP_PASS) {
-        this.logger.log(`Configuring Gmail transport for ${env.SMTP_USER}`);
-        this.transport = nodemailer.createTransport({
-          service: 'gmail',
-          auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
-          family: 4,
-          connectionTimeout: 15_000,
-          greetingTimeout: 15_000,
-          socketTimeout: 20_000,
-        } as any);
-      } else if (env.SMTP_HOST) {
-        this.logger.log(`Configuring SMTP transport host=${env.SMTP_HOST} port=${env.SMTP_PORT}`);
-        this.transport = nodemailer.createTransport({
-          host: env.SMTP_HOST,
-          port: env.SMTP_PORT,
-          secure: env.SMTP_SECURE || env.SMTP_PORT === 465,
-          auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
-          family: 4,
-          connectionTimeout: 15_000,
-          greetingTimeout: 15_000,
-          socketTimeout: 20_000,
-        } as any);
-      }
+      const host = isGmail ? 'smtp.gmail.com' : (env.SMTP_HOST || 'smtp.gmail.com');
+      const port = env.SMTP_PORT || (isGmail ? 587 : 587);
+      const secure = env.SMTP_SECURE || port === 465;
+
+      this.logger.log(`Configuring email transport host=${host} port=${port} secure=${secure} user=${env.SMTP_USER}`);
+      this.transport = nodemailer.createTransport({
+        host,
+        port,
+        secure,
+        auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
+        tls: { rejectUnauthorized: false },
+        family: 4,
+        connectionTimeout: 15_000,
+        greetingTimeout: 15_000,
+        socketTimeout: 20_000,
+      } as any);
     }
   }
 
@@ -70,8 +63,26 @@ export class MailService {
 
     try {
       await this.transport.sendMail({ from, ...msg });
+      this.logger.log(`Email successfully delivered to ${msg.to}: ${msg.subject}`);
     } catch (err: any) {
       this.logger.error(`SMTP delivery error to ${msg.to}: ${err?.message || err}`);
+      // Fallback: If port 587 failed, try port 465 SSL or service: 'gmail'
+      if (this.env.SMTP_USER && this.env.SMTP_PASS) {
+        try {
+          this.logger.warn(`Attempting fallback email transport on port 465 for ${msg.to}...`);
+          const fallback = nodemailer.createTransport({
+            service: 'gmail',
+            auth: { user: this.env.SMTP_USER, pass: this.env.SMTP_PASS },
+            family: 4,
+            connectionTimeout: 15_000,
+          } as any);
+          await fallback.sendMail({ from, ...msg });
+          this.logger.log(`Fallback email successfully delivered to ${msg.to}`);
+          return;
+        } catch (fallbackErr: any) {
+          this.logger.error(`Fallback SMTP delivery also failed: ${fallbackErr?.message || fallbackErr}`);
+        }
+      }
       throw err;
     }
   }

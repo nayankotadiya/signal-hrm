@@ -187,10 +187,14 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _sendCode() async {
     final id = _identifier.text.trim();
     if (id.length < 3) {
-      setState(() => _error = 'Enter your work email or mobile number.');
+      setState(() => _error = 'Enter your work email.');
       return;
     }
-    await _run(() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
       final r = await _session.requestOtp(id);
       if (mounted) {
         setState(() {
@@ -201,7 +205,25 @@ class _LoginPageState extends State<LoginPage> {
           _startTimer(r.resendAfterSeconds);
         });
       }
-    });
+    } on ApiException catch (e) {
+      if (mounted) {
+        // If code was already sent recently (within 60s), still switch to code entry!
+        if (e.code == 'OTP_RESEND_TOO_SOON' || e.message.contains('seconds') || e.message.contains('Wait')) {
+          setState(() {
+            _codeSent = true;
+            _mode = _AuthMode.otp;
+            _error = e.message;
+            _startTimer(60);
+          });
+        } else {
+          setState(() => _error = e.message);
+        }
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = describeError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _verifyOtp() async {
@@ -222,32 +244,36 @@ class _LoginPageState extends State<LoginPage> {
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
-        onTap: () => setState(() => _keepSignedIn = !_keepSignedIn),
+        onTap: () {
+          setState(() => _keepSignedIn = !_keepSignedIn);
+          bridge.writeLocal('shrm_keep_signed_in', _keepSignedIn ? 'true' : 'false');
+        },
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 20,
-                height: 20,
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 22,
+                height: 22,
                 decoration: BoxDecoration(
                   color: _keepSignedIn ? t.accent : Colors.transparent,
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(
                     color: _keepSignedIn ? t.accent : t.muted.withValues(alpha: 0.6),
-                    width: 1.5,
+                    width: 2,
                   ),
                 ),
                 alignment: Alignment.center,
                 child: _keepSignedIn
-                    ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+                    ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
                     : null,
               ),
               const SizedBox(width: 10),
               Text(
                 'Keep me signed in',
-                style: t.text.body(color: t.ink, weight: FontWeight.w500).copyWith(fontSize: 13.5),
+                style: t.text.body(color: t.ink, weight: FontWeight.w500).copyWith(fontSize: 14),
               ),
             ],
           ),
@@ -491,7 +517,18 @@ class _LoginPageState extends State<LoginPage> {
               busy: _busy,
               onPressed: _sendCode,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+            Center(
+              child: TextButton.icon(
+                icon: const Icon(Icons.pin_outlined, size: 16),
+                label: Text('Already have a verification code? Enter it here', style: t.text.caption(color: t.accent, weight: FontWeight.w600)),
+                onPressed: () => setState(() {
+                  _codeSent = true;
+                  _error = null;
+                }),
+              ),
+            ),
+            const SizedBox(height: 8),
             Center(
               child: TextButton.icon(
                 icon: const Icon(Icons.password_rounded, size: 16),

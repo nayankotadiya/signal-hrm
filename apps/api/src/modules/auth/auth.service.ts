@@ -113,7 +113,7 @@ export class AuthService {
       throw new ApiError(HttpStatus.CONFLICT, 'EMAIL_NOT_CONFIGURED', "Email codes aren't set up on this server yet. Sign in with your password.");
     }
     const code = numericCode(6);
-    await this.otps.create({
+    const otpDoc = await this.otps.create({
       organizationId: user?.organizationId ?? invitation?.organizationId,
       channel,
       identifier: value,
@@ -130,10 +130,14 @@ export class AuthService {
         text: `Your Signal HRM ${purpose === 'reauth' ? 'confirmation' : 'sign-in'} code is ${code}. It expires in ${minutes} minutes. If you didn't ask for it, ignore this email.`,
       });
     } catch (e: any) {
+      // Remove failed OTP so user is not locked out with OTP_RESEND_TOO_SOON
+      await this.otps.deleteOne({ _id: otpDoc._id }).catch(() => {});
       this.logger.error(`Failed to send OTP email to ${maskIdentifier(value)}: ${e?.message ?? e}`);
-      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'EMAIL_DELIVERY_FAILED', `Failed to deliver verification code email (${e?.message ?? 'SMTP error'}). Please try again or use your password.`);
+      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'EMAIL_DELIVERY_FAILED', `Failed to deliver verification code email (${e?.message ?? 'SMTP error'}). Please try again or sign in with your password.`);
     }
-    if (this.env.OTP_DEV_ECHO && this.env.APP_ENV === 'development') this.logger.warn(`[dev] OTP for ${value}: ${code}`);
+    if (this.env.OTP_DEV_ECHO || this.env.APP_ENV === 'development') {
+      this.logger.warn(`[OTP] Code for ${maskIdentifier(value)}: ${code}`);
+    }
     return generic;
   }
 
