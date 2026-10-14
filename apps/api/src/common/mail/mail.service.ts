@@ -22,9 +22,16 @@ export class MailService {
       if (isGmail && env.SMTP_USER && env.SMTP_PASS) {
         this.logger.log(`Configuring direct Gmail service transport for ${env.SMTP_USER}`);
         this.transport = nodemailer.createTransport({
-          service: 'gmail',
+          host: 'smtp.gmail.com',
+          port: 465,
+          secure: true,
           auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
-        });
+          tls: { rejectUnauthorized: false },
+          family: 4,
+          connectionTimeout: 8_000,
+          greetingTimeout: 8_000,
+          socketTimeout: 10_000,
+        } as any);
       } else {
         const host = env.SMTP_HOST || 'smtp.gmail.com';
         const port = env.SMTP_PORT || 587;
