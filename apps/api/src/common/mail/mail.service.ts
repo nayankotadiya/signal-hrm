@@ -19,22 +19,30 @@ export class MailService {
   constructor(@Inject(APP_CONFIG) private readonly env: AppEnv) {
     if (env.SMTP_HOST || env.SMTP_USER) {
       const isGmail = env.SMTP_HOST === 'smtp.gmail.com' || (!env.SMTP_HOST && env.SMTP_USER?.endsWith('@gmail.com'));
-      const host = isGmail ? 'smtp.gmail.com' : (env.SMTP_HOST || 'smtp.gmail.com');
-      const port = env.SMTP_PORT || (isGmail ? 587 : 587);
-      const secure = env.SMTP_SECURE || port === 465;
+      if (isGmail && env.SMTP_USER && env.SMTP_PASS) {
+        this.logger.log(`Configuring direct Gmail service transport for ${env.SMTP_USER}`);
+        this.transport = nodemailer.createTransport({
+          service: 'gmail',
+          auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
+        });
+      } else {
+        const host = env.SMTP_HOST || 'smtp.gmail.com';
+        const port = env.SMTP_PORT || 587;
+        const secure = env.SMTP_SECURE || port === 465;
 
-      this.logger.log(`Configuring email transport host=${host} port=${port} secure=${secure} user=${env.SMTP_USER}`);
-      this.transport = nodemailer.createTransport({
-        host,
-        port,
-        secure,
-        auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
-        tls: { rejectUnauthorized: false },
-        family: 4,
-        connectionTimeout: 15_000,
-        greetingTimeout: 15_000,
-        socketTimeout: 20_000,
-      } as any);
+        this.logger.log(`Configuring email transport host=${host} port=${port} secure=${secure} user=${env.SMTP_USER}`);
+        this.transport = nodemailer.createTransport({
+          host,
+          port,
+          secure,
+          auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
+          tls: { rejectUnauthorized: false },
+          family: 4,
+          connectionTimeout: 15_000,
+          greetingTimeout: 15_000,
+          socketTimeout: 20_000,
+        } as any);
+      }
     }
   }
 
