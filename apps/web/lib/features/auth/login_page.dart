@@ -182,7 +182,7 @@ class AuthFrame extends StatelessWidget {
   }
 }
 
-enum _AuthMode { password, otp, recovery }
+enum _AuthMode { password, recovery }
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key, this.expired = false, this.recovery = false});
@@ -199,13 +199,9 @@ class _LoginPageState extends State<LoginPage> {
   final _code = TextEditingController();
   final _password = TextEditingController();
   bool _obscurePassword = true;
-  bool _codeSent = false;
   bool _keepSignedIn = true;
   String? _error;
-  String? _destination;
   bool _busy = false;
-  int _resendIn = 0;
-  Timer? _timer;
 
   SessionController get _session => context.services.session;
 
@@ -255,21 +251,10 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void dispose() {
-    _timer?.cancel();
     _identifier.dispose();
     _code.dispose();
     _password.dispose();
     super.dispose();
-  }
-
-  void _startTimer(int seconds) {
-    _timer?.cancel();
-    setState(() => _resendIn = seconds);
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) return t.cancel();
-      setState(() => _resendIn = _resendIn > 0 ? _resendIn - 1 : 0);
-      if (_resendIn == 0) t.cancel();
-    });
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -301,68 +286,6 @@ class _LoginPageState extends State<LoginPage> {
     }
     await _run(() async {
       await _session.password(id, pwd, rememberMe: _keepSignedIn);
-      _persistRememberPreference(id);
-    });
-  }
-
-  Future<void> _sendCode() async {
-    final id = _identifier.text.trim();
-    if (id.length < 3) {
-      setState(() => _error = 'Enter your work email.');
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      final r = await _session.requestOtp(id);
-      if (mounted) {
-        setState(() {
-          _destination = r.destination;
-          _code.clear();
-          _codeSent = true;
-          _mode = _AuthMode.otp;
-          _startTimer(r.resendAfterSeconds);
-        });
-      }
-    } on ApiException catch (e) {
-      if (mounted) {
-        if (e.code == 'EMAIL_DELIVERY_FAILED' || e.code == 'EMAIL_NOT_CONFIGURED' || e.message.contains('timeout') || e.message.contains('SMTP')) {
-          setState(() {
-            _mode = _AuthMode.password;
-            _error = '${e.message} Please sign in directly using your password below.';
-          });
-        } else if (e.code == 'OTP_RESEND_TOO_SOON' || e.message.contains('seconds') || e.message.contains('Wait')) {
-          setState(() {
-            _codeSent = true;
-            _mode = _AuthMode.otp;
-            _error = e.message;
-            _startTimer(60);
-          });
-        } else {
-          setState(() {
-            _codeSent = true;
-            _error = e.message;
-          });
-        }
-      }
-    } catch (e) {
-      if (mounted) setState(() => _error = describeError(e));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _verifyOtp() async {
-    final code = _code.text.trim();
-    final id = _identifier.text.trim();
-    if (!RegExp(r'^\d{6}$').hasMatch(code)) {
-      setState(() => _error = 'Enter the 6-digit code.');
-      return;
-    }
-    await _run(() async {
-      await _session.verifyOtp(id, code, rememberMe: _keepSignedIn);
       _persistRememberPreference(id);
     });
   }
@@ -463,263 +386,62 @@ class _LoginPageState extends State<LoginPage> {
         Text('Sign in', style: t.text.heading(size: 28)),
         const SizedBox(height: 4),
         Text('Welcome back! Enter your work credentials to access your account.', style: t.text.body(color: t.muted)),
-        const SizedBox(height: 18),
+        const SizedBox(height: 20),
 
-        // Responsive, instant-touch Segmented Mode Selector
-        Container(
-          height: 44,
-          padding: const EdgeInsets.all(3),
-          decoration: BoxDecoration(
-            color: t.pillTrack,
-            borderRadius: BorderRadius.circular(NTokens.radiusPill),
-            border: t.cardBorder == const Color(0x00000000) ? null : Border.all(color: t.cardBorder),
-          ),
-          child: Row(
+        AutofillGroup(
+          child: Column(
             children: [
-              Expanded(
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                    onTap: () {
-                      setState(() {
-                        _mode = _AuthMode.password;
-                        _error = null;
-                      });
-                    },
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: _mode == _AuthMode.password ? t.card : Colors.transparent,
-                        borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                        boxShadow: _mode == _AuthMode.password
-                            ? [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 4, offset: const Offset(0, 1))]
-                            : null,
-                      ),
-                      alignment: Alignment.center,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.password_rounded, size: 16, color: _mode == _AuthMode.password ? t.ink : t.muted),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Password',
-                            style: t.text.caption(color: _mode == _AuthMode.password ? t.ink : t.muted).copyWith(
-                                  fontWeight: _mode == _AuthMode.password ? FontWeight.w600 : FontWeight.w500,
-                                  fontSize: 13,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+              NTextField(
+                label: 'Work email',
+                controller: _identifier,
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.email, AutofillHints.username],
+                prefixIcon: Icons.alternate_email_rounded,
+                textInputAction: TextInputAction.next,
+                autofocus: true,
               ),
-              Expanded(
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                    onTap: () {
-                      setState(() {
-                        _mode = _AuthMode.otp;
-                        _error = null;
-                      });
-                    },
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: _mode == _AuthMode.otp ? t.card : Colors.transparent,
-                        borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                        boxShadow: _mode == _AuthMode.otp
-                            ? [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 4, offset: const Offset(0, 1))]
-                            : null,
-                      ),
-                      alignment: Alignment.center,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.mail_outline_rounded, size: 16, color: _mode == _AuthMode.otp ? t.ink : t.muted),
-                          const SizedBox(width: 8),
-                          Text(
-                            'One-time OTP',
-                            style: t.text.caption(color: _mode == _AuthMode.otp ? t.ink : t.muted).copyWith(
-                                  fontWeight: _mode == _AuthMode.otp ? FontWeight.w600 : FontWeight.w500,
-                                  fontSize: 13,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+              const SizedBox(height: 14),
+              NTextField(
+                label: 'Password',
+                controller: _password,
+                obscure: _obscurePassword,
+                autofillHints: const [AutofillHints.password],
+                prefixIcon: Icons.lock_outline_rounded,
+                textInputAction: TextInputAction.go,
+                suffix: IconButton(
+                  icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 20, color: t.muted),
+                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                 ),
+                onSubmitted: (_) => _submitPassword(),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 18),
-
-        if (_mode == _AuthMode.password) ...[
-          AutofillGroup(
-            child: Column(
-              children: [
-                NTextField(
-                  label: 'Work email',
-                  controller: _identifier,
-                  keyboardType: TextInputType.emailAddress,
-                  autofillHints: const [AutofillHints.email, AutofillHints.username],
-                  prefixIcon: Icons.alternate_email_rounded,
-                  textInputAction: TextInputAction.next,
-                  autofocus: true,
-                ),
-                const SizedBox(height: 14),
-                NTextField(
-                  label: 'Password',
-                  controller: _password,
-                  obscure: _obscurePassword,
-                  autofillHints: const [AutofillHints.password],
-                  prefixIcon: Icons.lock_outline_rounded,
-                  textInputAction: TextInputAction.go,
-                  suffix: IconButton(
-                    icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 20, color: t.muted),
-                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                  ),
-                  onSubmitted: (_) => _submitPassword(),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              _buildKeepSignedInRow(t),
-              TextButton(
-                onPressed: () => setState(() {
-                  _mode = _AuthMode.recovery;
-                  _error = null;
-                }),
-                child: Text('Forgot password?', style: t.text.caption(color: t.accent).copyWith(fontSize: 13, fontWeight: FontWeight.w600)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          NButton(
-            label: 'Sign in to Account',
-            icon: Icons.login_rounded,
-            variant: NButtonVariant.accent,
-            busy: _busy,
-            onPressed: _submitPassword,
-          ),
-          const SizedBox(height: 12),
-          Center(
-            child: TextButton.icon(
-              icon: const Icon(Icons.mail_outline_rounded, size: 16),
-              label: Text('Sign in with Email OTP instead', style: t.text.caption(color: t.ink)),
+        const SizedBox(height: 12),
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            _buildKeepSignedInRow(t),
+            TextButton(
               onPressed: () => setState(() {
-                _mode = _AuthMode.otp;
+                _mode = _AuthMode.recovery;
                 _error = null;
               }),
-            ),
-          ),
-        ] else ...[
-          // OTP Mode (Always displays email + send button AND 6-digit code entry)
-          AutofillGroup(
-            child: NTextField(
-              label: 'Work email or mobile number',
-              controller: _identifier,
-              keyboardType: TextInputType.emailAddress,
-              prefixIcon: Icons.alternate_email_rounded,
-              autofillHints: const [AutofillHints.email, AutofillHints.telephoneNumber],
-              textInputAction: TextInputAction.next,
-              autofocus: !_codeSent,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: NButton(
-                  label: _resendIn > 0
-                      ? 'Resend code in ${_resendIn}s'
-                      : (_codeSent ? 'Resend verification code' : 'Send 6-digit verification code'),
-                  icon: Icons.send_rounded,
-                  variant: _codeSent ? NButtonVariant.secondary : NButtonVariant.accent,
-                  busy: _busy,
-                  onPressed: _resendIn > 0 || _busy ? null : _sendCode,
-                ),
-              ),
-            ],
-          ),
-          if (_codeSent) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: t.green.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: t.green.withValues(alpha: 0.35)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.mark_email_read_rounded, color: t.green, size: 20),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Code sent to ${_destination ?? _identifier.text}',
-                      style: t.text.caption(color: t.ink, weight: FontWeight.w600),
-                    ),
-                  ),
-                ],
-              ),
+              child: Text('Forgot password?', style: t.text.caption(color: t.accent).copyWith(fontSize: 13, fontWeight: FontWeight.w600)),
             ),
           ],
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Text('Enter 6-digit Code', style: t.text.title(size: 15)),
-              const Spacer(),
-              if (!_codeSent)
-                Text('Enter if already received', style: t.text.caption(color: t.muted)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          NTextField(
-            label: '6-digit OTP code',
-            controller: _code,
-            keyboardType: TextInputType.number,
-            prefixIcon: Icons.pin_rounded,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
-            autofillHints: const [AutofillHints.oneTimeCode],
-            autofocus: _codeSent,
-            onSubmitted: (_) => _verifyOtp(),
-            onChanged: (v) {
-              if (v.trim().length == 6 && !_busy) _verifyOtp();
-            },
-          ),
-          const SizedBox(height: 10),
-          Align(alignment: Alignment.centerLeft, child: _buildKeepSignedInRow(t)),
-          const SizedBox(height: 14),
-          NButton(
-            label: 'Verify Code & Sign In',
-            icon: Icons.login_rounded,
-            variant: NButtonVariant.accent,
-            busy: _busy,
-            onPressed: _verifyOtp,
-          ),
-          const SizedBox(height: 12),
-          Center(
-            child: TextButton.icon(
-              icon: const Icon(Icons.password_rounded, size: 16),
-              label: Text('Sign in with Password instead', style: t.text.caption(color: t.ink, weight: FontWeight.w600)),
-              onPressed: () => setState(() {
-                _mode = _AuthMode.password;
-                _error = null;
-              }),
-            ),
-          ),
-        ],
+        ),
+        const SizedBox(height: 18),
+        NButton(
+          label: 'Sign in to Account',
+          icon: Icons.login_rounded,
+          variant: NButtonVariant.accent,
+          busy: _busy,
+          onPressed: _submitPassword,
+        ),
 
         // Single Sign-On (Google / Apple)
         if (AppConfig.googleClientId.isNotEmpty || AppConfig.appleClientId.isNotEmpty) ...[
