@@ -117,6 +117,7 @@ export const AttendanceSchema = orgScoped(
       approvedCorrectionId: ObjectId,
       leaveRequestId: ObjectId,
       notes: String,
+      checkoutReminderSentAt: Date,
     },
     baseOptions,
   ),

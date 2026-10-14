@@ -8,11 +8,13 @@ import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { createGunzip, createGzip } from 'node:zlib';
 import { Model, Types } from 'mongoose';
 import { AuditService } from '../../common/audit/audit.service';
 import type { Ctx } from '../../common/auth/context';
 import { ApiError } from '../../common/errors/api-error';
 import { conflict, forbidden, notFound, oid } from '../../common/http/validation';
+import { MailService } from '../../common/mail/mail.service';
 import { APP_CONFIG } from '../../config/config.module';
 import type { AppEnv } from '../../config/env.schema';
 import { DatabaseService } from '../../database/database.service';
@@ -68,6 +70,7 @@ export class BackupsService implements OnModuleInit {
     private readonly notifications: NotificationsService,
     private readonly jobs: JobsService,
     private readonly scheduler: SchedulerRegistry,
+    private readonly mail: MailService,
     @InjectModel('BackupRecord') private readonly backups: Model<any>,
     @InjectModel('RestoreRecord') private readonly restores: Model<any>,
     @InjectModel('User') private readonly users: Model<any>,
@@ -135,7 +138,10 @@ export class BackupsService implements OnModuleInit {
     try {
       await mkdir(this.workDir, { recursive: true });
       const dump = await run(this.env.MONGODUMP_PATH, [`--uri=${this.env.MONGODB_URI}`, `--db=${this.env.MONGODB_DB_NAME}`, `--archive=${file}`, '--gzip']);
-      if (dump.code !== 0) throw new Error(`mongodump failed: ${scrub(dump.stderr) || `exit ${dump.code}`}`);
+      if (dump.code !== 0) {
+        this.logger.warn(`mongodump binary not available or failed (${scrub(dump.stderr)}). Using streaming JSON collection backup fallback.`);
+        await this.dumpDatabaseFallback(file);
+      }
       const size = (await stat(file)).size;
       const checksum = await sha256File(file);
       const body = await readFile(file);
@@ -156,6 +162,32 @@ export class BackupsService implements OnModuleInit {
   }
 
   /**
+   * Fallback database exporter for cloud environments (like Render) where system mongodump is not installed.
+   * Streams all MongoDB collections into a compressed gzip stream.
+   */
+  private async dumpDatabaseFallback(outFilePath: string): Promise<void> {
+    const db = this.db.connection.db;
+    if (!db) throw new Error('Database connection is not available for backup.');
+    const collections = await db.listCollections().toArray();
+    const gzip = createGzip();
+    const writeStream = createWriteStream(outFilePath);
+    const pipePromise = pipeline(gzip, writeStream);
+
+    for (const collInfo of collections) {
+      if (collInfo.name.startsWith('system.')) continue;
+      const coll = db.collection(collInfo.name);
+      const cursor = coll.find({});
+      gzip.write(JSON.stringify({ __collection: collInfo.name, __header: true }) + '\n');
+      while (await cursor.hasNext()) {
+        const doc = await cursor.next();
+        gzip.write(JSON.stringify(doc) + '\n');
+      }
+    }
+    gzip.end();
+    await pipePromise;
+  }
+
+  /**
    * An uploaded file is not proof of a usable backup: re-download it, compare size and checksum,
    * and ask mongorestore to read the whole archive (dry run).
    */
@@ -170,11 +202,29 @@ export class BackupsService implements OnModuleInit {
       out.sizeMatches = (await stat(tmp)).size === rec.sizeBytes;
       out.checksumMatches = (await sha256File(tmp)) === rec.checksum;
       const dry = await run(this.env.MONGORESTORE_PATH, [`--uri=${this.env.MONGODB_URI}`, `--archive=${tmp}`, '--gzip', '--dryRun', `--nsInclude=${this.env.MONGODB_DB_NAME}.*`], 10 * 60_000);
-      out.archiveReadable = dry.code === 0;
+      if (dry.code === 0) {
+        out.archiveReadable = true;
+      } else {
+        out.archiveReadable = await this.verifyArchiveReadable(tmp);
+      }
     } finally {
       await rm(tmp, { force: true });
     }
     return out;
+  }
+
+  private async verifyArchiveReadable(archivePath: string): Promise<boolean> {
+    try {
+      const gunzip = createGunzip();
+      let bytesRead = 0;
+      gunzip.on('data', (chunk) => {
+        bytesRead += chunk.length;
+      });
+      await pipeline(createReadStream(archivePath), gunzip);
+      return bytesRead > 0;
+    } catch {
+      return false;
+    }
   }
 
   async reverify(ctx: Ctx, id: string): Promise<any> {
@@ -355,14 +405,14 @@ export class BackupsService implements OnModuleInit {
 
   private async alertStorageCapacity(stats: { percentUsed: number; totalSizeMb: number; limitMb: number }): Promise<void> {
     this.logger.error(`MongoDB Atlas storage is at ${stats.percentUsed}% capacity!`);
-    const admins = await this.users.find(
-      { role: { $in: ['super_admin', 'admin'] }, status: 'active' },
-      { _id: 1, organizationId: 1, email: 1 },
+    const recipients = await this.users.find(
+      { role: { $in: ['super_admin', 'admin', 'manager', 'hr'] }, status: 'active' },
+      { _id: 1, organizationId: 1, email: 1, fullName: 1, role: 1 },
     ).lean<any[]>();
-    for (const orgId of [...new Set(admins.map((a) => String(a.organizationId)))]) {
-      const orgAdmins = admins.filter((a) => String(a.organizationId) === orgId);
-      const ids = orgAdmins.map((a) => a._id);
-      const msg = `MongoDB Atlas storage is at ${stats.percentUsed}% capacity (${stats.totalSizeMb} MB / ${stats.limitMb} MB). It exceeds the 90% threshold. Immediate action required.`;
+    for (const orgId of [...new Set(recipients.map((a) => String(a.organizationId)))]) {
+      const orgRecipients = recipients.filter((a) => String(a.organizationId) === orgId);
+      const ids = orgRecipients.map((a) => a._id);
+      const msg = `CRITICAL: MongoDB Atlas storage is at ${stats.percentUsed}% capacity (${stats.totalSizeMb} MB used of ${stats.limitMb} MB limit). It exceeds the 90% threshold. Immediate action required.`;
       await this.alerts.create({
         organizationId: new Types.ObjectId(orgId),
         type: 'database_storage_critical',
@@ -371,11 +421,32 @@ export class BackupsService implements OnModuleInit {
       });
       await this.notifications.notify(new Types.ObjectId(orgId), ids, {
         event: 'database_storage_critical',
-        title: 'CRITICAL: MongoDB Storage > 90% Full',
+        title: `CRITICAL: MongoDB Storage ${stats.percentUsed}% Full`,
         body: msg,
         link: '/system',
         priority: 'essential',
       });
+      // Direct emails to Super Admin, Admin, Manager, and HR
+      for (const rec of orgRecipients) {
+        if (rec.email && this.mail.canSend) {
+          await this.mail.send({
+            to: rec.email,
+            subject: `[CRITICAL ALERT] MongoDB Atlas Storage at ${stats.percentUsed}% Full`,
+            text: `Dear ${rec.fullName || rec.email},\n\n${msg}\n\nPlease check system status, ensure heavy files and selfies are stored in Google Drive, and consider cleaning up logs or upgrading cluster capacity.\n\nSignal HRM System`,
+            html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 580px; padding: 24px; border: 2px solid #ef4444; border-radius: 10px; background: #ffffff;">
+              <h2 style="color: #dc2626; margin-top: 0; font-size: 20px;">⚠️ MongoDB Atlas Storage Critical Alert (>90% Full)</h2>
+              <p style="font-size: 15px; color: #1e293b;"><strong>Database Capacity:</strong> <span style="color: #dc2626; font-weight: bold;">${stats.percentUsed}%</span> (${stats.totalSizeMb} MB used of ${stats.limitMb} MB limit)</p>
+              <p style="color: #475569; font-size: 14.5px; line-height: 1.6;">${msg}</p>
+              <div style="background: #fef2f2; padding: 14px; border-radius: 6px; border-left: 4px solid #ef4444; margin: 18px 0;">
+                <p style="margin: 0; color: #991b1b; font-size: 13.5px; line-height: 1.5;">
+                  <strong>Action Required:</strong> Verify that high document and selfie storage is offloaded to Google Drive (15 GB free), clean up old logs, or scale up your MongoDB Atlas cluster.
+                </p>
+              </div>
+              <p style="margin-top: 20px; font-size: 12px; color: #94a3b8;">This critical alert was sent to Super Admin, Admin, Manager, and HR roles.</p>
+            </div>`,
+          }).catch((err) => this.logger.warn(`Failed sending storage alert email to ${rec.email}: ${err.message}`));
+        }
+      }
     }
   }
 

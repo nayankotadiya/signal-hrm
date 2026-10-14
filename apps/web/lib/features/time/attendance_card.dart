@@ -111,14 +111,28 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
 
   Future<String?> _takeSelfie(bool checkIn, String? locationName, {String? stepTitle}) async {
     final api = context.api;
-    final title = stepTitle ?? (checkIn ? 'Check-in selfie' : 'Check-out selfie');
-    final picked = await showNSheet<PickedFile?>(
-      context,
-      title: title,
-      subtitle: 'Photo verification is required for attendance.',
-      builder: (ctx) => _SelfieSheet(isCheckIn: checkIn, locationName: locationName, stepTitle: stepTitle),
-    );
-    if (picked == null || !mounted) return null;
+    // Directly open device camera without showing intermediate review sheet
+    PickedFile? picked;
+    try {
+      picked = await bridge.pickFile(accept: 'image/*', capture: 'user');
+    } catch (_) {
+      picked = null;
+    }
+
+    // Fallback: If camera was cancelled or native picker was blocked, show sheet to retry
+    if (picked == null) {
+      if (!mounted) return null;
+      final retry = await showNSheet<PickedFile?>(
+        context,
+        title: stepTitle ?? (checkIn ? 'Check-in photo' : 'Check-out photo'),
+        subtitle: 'Camera was closed. Tap below to capture your attendance photo.',
+        builder: (ctx) => _SelfieSheet(isCheckIn: checkIn, locationName: locationName, stepTitle: stepTitle),
+      );
+      if (retry == null || !mounted) return null;
+      picked = retry;
+    }
+
+    if (!mounted) return null;
     setState(() => _phase = _Phase.sending);
     final rec = await api.upload(picked, purpose: 'selfie');
     return rec['id'] as String?;
@@ -931,7 +945,7 @@ class _SelfieSheetState extends State<_SelfieSheet> {
     try {
       final f = await bridge.pickFile(accept: 'image/*', capture: 'user');
       if (f != null && mounted) {
-        setState(() => _picked = f);
+        Navigator.of(context).pop(f);
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -944,14 +958,12 @@ class _SelfieSheetState extends State<_SelfieSheet> {
       final data = await rootBundle.load('assets/demo/selfie.jpg');
       final bytes = data.buffer.asUint8List();
       if (mounted) {
-        setState(() {
-          _picked = PickedFile(name: 'selfie.jpg', bytes: bytes, mimeType: 'image/jpeg');
-        });
+        Navigator.of(context).pop(PickedFile(name: 'selfie.jpg', bytes: bytes, mimeType: 'image/jpeg'));
       }
     } catch (_) {
       if (mounted) {
-        setState(() {
-          _picked = PickedFile(
+        Navigator.of(context).pop(
+          PickedFile(
             name: 'selfie.png',
             bytes: Uint8List.fromList([
               0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
@@ -962,8 +974,8 @@ class _SelfieSheetState extends State<_SelfieSheet> {
               0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
             ]),
             mimeType: 'image/png',
-          );
-        });
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);

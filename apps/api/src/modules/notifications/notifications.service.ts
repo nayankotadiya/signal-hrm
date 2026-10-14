@@ -39,11 +39,25 @@ export const NOTIFICATION_EVENTS = [
   'lead_assigned',
   'follow_up_due',
   'travel_decided',
+  'database_storage_critical',
+  'attendance_checkout_reminder',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number] | string;
 export const CHANNELS = ['in_app', 'email', 'push', 'whatsapp', 'sms'] as const;
 
-const EMAIL_BY_DEFAULT = new Set(['security_alert', 'approval_pending', 'leave_decided', 'expense_decided', 'payslip_available', 'backup_failure', 'system_incident', 'document_ack_required', 'travel_decided']);
+const EMAIL_BY_DEFAULT = new Set([
+  'security_alert',
+  'approval_pending',
+  'leave_decided',
+  'expense_decided',
+  'payslip_available',
+  'backup_failure',
+  'system_incident',
+  'document_ack_required',
+  'travel_decided',
+  'database_storage_critical',
+  'attendance_checkout_reminder',
+]);
 
 export interface NotifyInput {
   event: NotificationEvent;

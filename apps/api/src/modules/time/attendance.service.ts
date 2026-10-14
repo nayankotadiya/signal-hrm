@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, OnModuleInit } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { Model, Types } from 'mongoose';
 import { z } from 'zod';
@@ -8,7 +8,10 @@ import { PermissionsService } from '../../common/authz/permissions.service';
 import { ScopeService } from '../../common/authz/scope.service';
 import { ApiError } from '../../common/errors/api-error';
 import { badRequest, conflict, dayString, forbidden, notFound, oid, Paged } from '../../common/http/validation';
+import { MailService } from '../../common/mail/mail.service';
 import { addDays, daysBetween, localParts, OrgSettingsService, weekdayOf, zonedTimeToUtc } from '../../common/org/org-settings.service';
+import { APP_CONFIG } from '../../config/config.module';
+import type { AppEnv } from '../../config/env.schema';
 import { InjectModel, serialize } from '../../database/model';
 import { ApprovalEngine } from '../approvals/approval.engine';
 import { FilesService } from '../files/files.service';
@@ -49,7 +52,10 @@ const geoErr = (code: string, message: string, meta: Record<string, unknown>) =>
 
 @Injectable()
 export class AttendanceService implements OnModuleInit {
+  private readonly logger = new Logger('Attendance');
+
   constructor(
+    @Inject(APP_CONFIG) private readonly env: AppEnv,
     private readonly audit: AuditService,
     private readonly scope: ScopeService,
     private readonly orgSettings: OrgSettingsService,
@@ -57,6 +63,7 @@ export class AttendanceService implements OnModuleInit {
     private readonly files: FilesService,
     private readonly approvals: ApprovalEngine,
     private readonly notifications: NotificationsService,
+    private readonly mail: MailService,
     private readonly realtime: RealtimeService,
     private readonly jobs: JobsService,
     @InjectModel('Attendance') private readonly attendance: Model<any>,
@@ -65,6 +72,7 @@ export class AttendanceService implements OnModuleInit {
     @InjectModel('AttendanceFlag') private readonly flags: Model<any>,
     @InjectModel('GpsAttempt') private readonly gpsAttempts: Model<any>,
     @InjectModel('Employee') private readonly employees: Model<any>,
+    @InjectModel('User') private readonly users: Model<any>,
     @InjectModel('Location') private readonly locations: Model<any>,
     @InjectModel('Device') private readonly devices: Model<any>,
     @InjectModel('Holiday') private readonly holidays: Model<any>,
@@ -664,6 +672,100 @@ export class AttendanceService implements OnModuleInit {
         purged++;
       }
       return `${purged} facial evidence records and photos permanently purged (1m 15d retention)`;
+    });
+  }
+
+  /**
+   * Automated 7:00 PM attendance check-out reminder (every day except Sunday).
+   * Runs periodically (every 15 minutes) and evaluates the local time for each organization.
+   * If the organization's local time is 7:00 PM (19:00, 1140 minutes) or later on Monday–Saturday,
+   * it finds employees who checked in today but have not checked out, and sends them an in-app
+   * notification, web push, and direct email reminder.
+   */
+  @Cron('*/15 * * * *')
+  async remindCheckoutAt7Pm(): Promise<void> {
+    await this.jobs.run('attendance.checkout_reminder_7pm', async () => {
+      let notifiedCount = 0;
+      const orgIds = await this.employees.distinct('organizationId');
+      const now = new Date();
+
+      for (const orgId of orgIds) {
+        const org = await this.orgSettings.get(orgId);
+        if (!org) continue;
+
+        const { day, minutes, weekday } = localParts(now, org.timezone);
+        // Exclude Sunday (weekday === 0 in JS Date / localParts)
+        if (weekday === 0) continue;
+
+        // Only trigger at or after 7:00 PM (19:00 = 1140 minutes) until midnight
+        if (minutes < 1140 || minutes >= 1440) continue;
+
+        // Find employees who checked in today and haven't checked out and haven't received reminder yet today
+        const unclosed = await this.attendance.find({
+          organizationId: orgId,
+          workDate: day,
+          'checkIn.at': { $exists: true },
+          'checkOut.at': { $exists: false },
+          checkoutReminderSentAt: { $exists: false },
+        }).lean<any[]>();
+
+        for (const record of unclosed) {
+          const emp = await this.employees.findById(record.employeeId).lean<any>();
+          if (!emp) continue;
+
+          const user = emp.userId ? await this.users.findById(emp.userId).lean<any>() : null;
+          const targetEmail = user?.email || emp.contactEmail;
+          const targetName = emp.firstName ? `${emp.firstName} ${emp.lastName || ''}`.trim() : user?.fullName || 'Colleague';
+          const title = 'Reminder: Please Record Your Check-Out';
+          const body = `Hi ${targetName}, you checked in today (${day}) but have not checked out yet. Please open Signal HRM to complete your check-out.`;
+
+          // 1. In-App and Push Notification
+          if (emp.userId) {
+            await this.notifications.notify(orgId, [emp.userId], {
+              event: 'attendance_checkout_reminder',
+              title,
+              body,
+              link: '/time/attendance',
+              priority: 'essential',
+            });
+          }
+
+          // 2. Direct Email Notification
+          if (targetEmail && this.mail.canSend) {
+            await this.mail.send({
+              to: targetEmail,
+              subject: `[Attendance Reminder] Don't forget to check out today (${day})`,
+              text: `Dear ${targetName},\n\nYou checked in today (${day}) but have not yet recorded your check-out.\n\nPlease log in to Signal HRM and check out before you leave:\n${this.env.PUBLIC_WEB_URL}/time/attendance\n\nBest regards,\nSignal HRM`,
+              html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 540px; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+                <div style="margin-bottom: 16px;">
+                  <span style="display: inline-block; padding: 4px 10px; background: #fef3c7; color: #b45309; border-radius: 6px; font-size: 12px; font-weight: 700; text-transform: uppercase;">Attendance Reminder</span>
+                </div>
+                <h2 style="margin: 0 0 12px 0; color: #0f172a; font-size: 18px; font-weight: 600;">Time to Check Out</h2>
+                <p style="margin: 0 0 16px 0; color: #334155; font-size: 14.5px; line-height: 1.6;">
+                  Hi <strong>${targetName}</strong>,<br/><br/>
+                  Our records show that you checked in today (<strong>${day}</strong>) but haven't checked out yet.
+                </p>
+                <p style="margin: 0 0 20px 0; color: #334155; font-size: 14.5px; line-height: 1.6;">
+                  Please take a moment to record your check-out to make sure your work hours and attendance are accurately calculated.
+                </p>
+                <div style="margin: 24px 0;">
+                  <a href="${this.env.PUBLIC_WEB_URL}/time/attendance" style="display: inline-block; padding: 10px 22px; background: #2563eb; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">Open Signal HRM & Check Out</a>
+                </div>
+                <hr style="margin: 24px 0 12px 0; border: none; border-top: 1px solid #f1f5f9;" />
+                <p style="margin: 0; color: #94a3b8; font-size: 11.5px;">This automated reminder is sent daily at 7:00 PM (Monday through Saturday, excluding Sunday).</p>
+              </div>`,
+            }).catch((err) => this.logger.warn(`Failed sending 7pm reminder email to ${targetEmail}: ${err.message}`));
+          }
+
+          // Mark reminder sent on record
+          await this.attendance.updateOne(
+            { _id: record._id },
+            { $set: { checkoutReminderSentAt: new Date() } },
+          );
+          notifiedCount++;
+        }
+      }
+      return `${notifiedCount} employees reminded to check out at 7:00 PM`;
     });
   }
 }
