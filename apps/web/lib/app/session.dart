@@ -49,9 +49,16 @@ class Me {
 }
 
 class OtpSent {
-  const OtpSent({required this.destination, required this.resendAfterSeconds});
+  const OtpSent({
+    required this.destination,
+    required this.resendAfterSeconds,
+    this.codePreview,
+    this.notice,
+  });
   final String destination;
   final int resendAfterSeconds;
+  final String? codePreview;
+  final String? notice;
 }
 
 /// Owns sign-in state. The access token lives in [ApiClient] memory; a page reload restores the
@@ -113,7 +120,12 @@ class SessionController extends ChangeNotifier {
 
   Future<OtpSent> requestOtp(String identifier) async {
     final j = await api.post('/auth/otp/request', body: {'identifier': identifier.trim()}) as Json;
-    return OtpSent(destination: '${j['destination'] ?? identifier}', resendAfterSeconds: (j['resendAfterSeconds'] as num?)?.toInt() ?? 60);
+    return OtpSent(
+      destination: '${j['destination'] ?? identifier}',
+      resendAfterSeconds: (j['resendAfterSeconds'] as num?)?.toInt() ?? 60,
+      codePreview: j['codePreview'] as String?,
+      notice: j['notice'] as String?,
+    );
   }
 
   Future<void> verifyOtp(String identifier, String code, {bool rememberMe = true}) async =>

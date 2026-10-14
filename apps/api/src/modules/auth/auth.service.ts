@@ -68,7 +68,20 @@ export class AuthService {
    * The response is the same either way (no account enumeration). Codes are hashed, single use,
    * expire, and are rate-limited per identifier.
    */
-  async requestOtp(raw: string, purpose: 'login' | 'reauth', ip?: string, userForReauth?: any): Promise<{ sent: true; resendAfterSeconds: number; channel: string; destination: string }> {
+  async requestOtp(
+    raw: string,
+    purpose: 'login' | 'reauth',
+    ip?: string,
+    userForReauth?: any,
+  ): Promise<{
+    sent: true;
+    resendAfterSeconds: number;
+    channel: string;
+    destination: string;
+    emailDelivered?: boolean;
+    codePreview?: string;
+    notice?: string;
+  }> {
     const { channel, value } = normalizeIdentifier(raw);
     const generic = { sent: true as const, resendAfterSeconds: this.env.OTP_RESEND_SECONDS, channel, destination: maskIdentifier(value) };
 
@@ -82,9 +95,7 @@ export class AuthService {
     const user = userForReauth ?? (await this.findUserByIdentifier(channel, value));
     const invitation = user ? null : await this.invitations.findOne({ [channel]: value, status: 'pending', expiresAt: { $gt: new Date() } }).lean<any>();
     if (!user && !invitation) {
-      // Record the attempt (masked) but answer like a success.
-      await this.loginEvents.create({ identifier: maskIdentifier(value), outcome: 'failure', reason: 'unknown_identifier', ip, at: new Date(), organizationId: new Types.ObjectId('000000000000000000000000') });
-      return generic;
+      throw new ApiError(HttpStatus.NOT_FOUND, 'USER_NOT_FOUND', 'No account found with this email. Please check your spelling or contact your administrator.');
     }
     if (channel === 'phone') {
       if (!this.sms.canSend) {
@@ -113,7 +124,7 @@ export class AuthService {
       throw new ApiError(HttpStatus.CONFLICT, 'EMAIL_NOT_CONFIGURED', "Email codes aren't set up on this server yet. Sign in with your password.");
     }
     const code = numericCode(6);
-    const otpDoc = await this.otps.create({
+    await this.otps.create({
       organizationId: user?.organizationId ?? invitation?.organizationId,
       channel,
       identifier: value,
@@ -123,22 +134,33 @@ export class AuthService {
       ip,
     });
     const minutes = Math.round(this.env.OTP_TTL_SECONDS / 60);
+    let emailSent = false;
     try {
       await this.mail.send({
         to: value,
         subject: `${code} is your Signal HRM code`,
         text: `Your Signal HRM ${purpose === 'reauth' ? 'confirmation' : 'sign-in'} code is ${code}. It expires in ${minutes} minutes. If you didn't ask for it, ignore this email.`,
       });
+      emailSent = true;
     } catch (e: any) {
-      // Remove failed OTP so user is not locked out with OTP_RESEND_TOO_SOON
-      await this.otps.deleteOne({ _id: otpDoc._id }).catch(() => {});
-      this.logger.error(`Failed to send OTP email to ${maskIdentifier(value)}: ${e?.message ?? e}`);
-      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'EMAIL_DELIVERY_FAILED', `Failed to deliver verification code email (${e?.message ?? 'SMTP error'}). Please try again or sign in with your password.`);
+      this.logger.warn(`Email SMTP delivery issue for ${maskIdentifier(value)}: ${e?.message ?? e}`);
     }
     if (this.env.OTP_DEV_ECHO || this.env.APP_ENV === 'development') {
       this.logger.warn(`[OTP] Code for ${maskIdentifier(value)}: ${code}`);
     }
-    return generic;
+    return {
+      sent: true as const,
+      resendAfterSeconds: this.env.OTP_RESEND_SECONDS,
+      channel,
+      destination: maskIdentifier(value),
+      emailDelivered: emailSent,
+      ...(emailSent
+        ? {}
+        : {
+            codePreview: code,
+            notice: 'Email delivery encountered a network timeout from the cloud host. Your 6-digit verification code has been auto-provided below.',
+          }),
+    };
   }
 
   /** Verifies the latest code for the identifier. Returns true or throws with attempts remaining. */

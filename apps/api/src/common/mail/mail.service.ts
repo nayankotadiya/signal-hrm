@@ -28,13 +28,13 @@ export class MailService {
           auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
           tls: { rejectUnauthorized: false },
           family: 4,
-          connectionTimeout: 8_000,
-          greetingTimeout: 8_000,
-          socketTimeout: 10_000,
+          connectionTimeout: 4_000,
+          greetingTimeout: 4_000,
+          socketTimeout: 5_000,
         } as any);
       } else {
         const host = env.SMTP_HOST || 'smtp.gmail.com';
-        const port = env.SMTP_PORT || 587;
+        const port = env.SMTP_PORT || 465;
         const secure = env.SMTP_SECURE || port === 465;
 
         this.logger.log(`Configuring email transport host=${host} port=${port} secure=${secure} user=${env.SMTP_USER}`);
@@ -45,9 +45,9 @@ export class MailService {
           auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
           tls: { rejectUnauthorized: false },
           family: 4,
-          connectionTimeout: 15_000,
-          greetingTimeout: 15_000,
-          socketTimeout: 20_000,
+          connectionTimeout: 4_000,
+          greetingTimeout: 4_000,
+          socketTimeout: 5_000,
         } as any);
       }
     }
@@ -89,7 +89,7 @@ export class MailService {
             service: 'gmail',
             auth: { user: this.env.SMTP_USER, pass: this.env.SMTP_PASS },
             family: 4,
-            connectionTimeout: 15_000,
+            connectionTimeout: 5_000,
           } as any);
           await fallback.sendMail({ from, ...msg });
           this.logger.log(`Fallback email successfully delivered to ${msg.to}`);

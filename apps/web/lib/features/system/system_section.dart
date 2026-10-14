@@ -232,7 +232,7 @@ class _BackupsTabState extends State<BackupsTab> {
                   NInfoRow(label: 'Status', value: gd != null && gd['status'] != null ? '${gd['status']}'.toUpperCase() : 'CONNECTED'),
                   NInfoRow(label: 'Target Folder', value: gd != null && gd['targetFolder'] != null ? '${gd['targetFolder']}' : 'Signal-HRM-Automated-Backups'),
                   NInfoRow(label: 'Auto Schedule', value: gd != null && gd['schedule'] != null ? '${gd['schedule']}' : 'Every day at 02:30 UTC'),
-                  NInfoRow(label: 'Backup Type', value: 'Automated Atlas BSON + Gzip'),
+                  const NInfoRow(label: 'Backup Type', value: 'Automated Atlas BSON + Gzip'),
                 ]);
               }),
             ),
