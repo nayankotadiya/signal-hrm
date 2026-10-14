@@ -47,4 +47,7 @@ class StubBridge implements PlatformBridge {
 
   @override
   Future<bool> subscribePushNotifications(String apiBaseUrl, String? token) async => false;
+
+  @override
+  void openUrl(String url) {}
 }

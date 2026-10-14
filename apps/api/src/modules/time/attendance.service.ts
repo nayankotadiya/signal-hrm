@@ -184,6 +184,7 @@ export class AttendanceService implements OnModuleInit {
       Object.assign(punch, { latitude: input.latitude, longitude: input.longitude, accuracyMeters: Math.round(input.accuracyMeters!) });
     }
 
+    let isOutsideCompany = false;
     if (!requireLocation) {
       punch.verification = hasFix ? 'not_required' : 'no_location';
       punch.method = 'remote';
@@ -206,7 +207,6 @@ export class AttendanceService implements OnModuleInit {
         exceptionAvailable: failures >= retryLimit || input.locationStatus === 'denied',
       });
     } else if (!location) {
-      if (!settings.allowRemote) throw geoErr('NO_ASSIGNED_LOCATION', 'You don’t have a work location yet. Ask HR to assign one.', { exceptionAvailable: true });
       punch.method = 'remote';
       punch.verification = 'not_required';
     } else {
@@ -223,23 +223,27 @@ export class AttendanceService implements OnModuleInit {
           retriesLeft: Math.max(0, retryLimit - failures),
           exceptionAvailable: failures >= retryLimit,
         });
-      } else if (settings.allowRemote && input.remote) {
-        Object.assign(punch, { method: 'remote', verification: 'outside_radius', distanceMeters: verdict.distanceMeters });
-        pendingFlags.push({ type: 'outside_geofence', severity: 'low', details: { distanceMeters: verdict.distanceMeters, radiusMeters: verdict.radiusMeters, remote: true } });
       } else {
-        const failures = await this.recordGpsFailure(ctx, emp._id, workDate, actionKey, 'outside_radius', input.accuracyMeters, verdict.distanceMeters);
-        throw geoErr('OUTSIDE_GEOFENCE', `You're about ${this.km(verdict.distanceMeters)} from ${location.name}; check-in works within ${verdict.radiusMeters} m.`, {
-          distanceMeters: verdict.distanceMeters,
-          radiusMeters: verdict.radiusMeters,
-          locationName: location.name,
-          retriesLeft: Math.max(0, retryLimit - failures),
-          exceptionAvailable: failures >= retryLimit,
+        // Outside of company area: allow punch with exact map coordinates, flag as outside_geofence
+        isOutsideCompany = true;
+        Object.assign(punch, { method: 'remote', verification: 'outside_radius', distanceMeters: verdict.distanceMeters });
+        pendingFlags.push({
+          type: 'outside_geofence',
+          severity: 'low',
+          details: {
+            distanceMeters: verdict.distanceMeters,
+            radiusMeters: verdict.radiusMeters,
+            remote: true,
+            latitude: input.latitude,
+            longitude: input.longitude,
+          },
         });
       }
     }
 
-    // ---- selfie
-    if (requireSelfie && !input.selfieFileId) throw geoErr('SELFIE_REQUIRED', 'Take a photo to continue.', {});
+    // ---- selfie: when user is outside company area, they do NOT upload selfies!
+    const effectiveRequireSelfie = !isOutsideCompany && requireSelfie;
+    if (effectiveRequireSelfie && !input.selfieFileId) throw geoErr('SELFIE_REQUIRED', 'Take a photo to continue.', {});
     let selfieFile: any;
     if (input.selfieFileId) selfieFile = await this.files.requireOwnUpload(ctx, input.selfieFileId, 'selfie', 10);
 

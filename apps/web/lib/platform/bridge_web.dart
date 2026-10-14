@@ -241,4 +241,9 @@ class WebBridge implements PlatformBridge {
       return false;
     }
   }
+
+  @override
+  void openUrl(String url) {
+    web.window.open(url, '_blank');
+  }
 }

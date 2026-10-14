@@ -9,6 +9,7 @@ import '../../widgets/form_kit.dart';
 import '../../widgets/format.dart';
 import '../../widgets/section.dart';
 import '../../widgets/status.dart';
+import '../../platform/bridge.dart';
 import 'attendance_card.dart';
 import 'leave_tab.dart';
 import 'shifts_tab.dart';
@@ -217,26 +218,83 @@ class _AttendanceRecordsState extends State<_AttendanceRecords> {
           emptyTitle: 'No attendance records for these filters',
           itemBuilder: (_, __, ___) => const SizedBox.shrink(),
           wrap: (context, items, _) => NDataTable(
-            columns: const [NColumn('Person', flex: 3), NColumn('Day'), NColumn('In'), NColumn('Out'), NColumn('Worked', numeric: true, hideOnTablet: true), NColumn('Check', flex: 3, hideOnTablet: true), NColumn('Status')],
+            columns: const [NColumn('Person', flex: 3), NColumn('Day'), NColumn('In'), NColumn('Out'), NColumn('Worked', numeric: true, hideOnTablet: true), NColumn('Check & Location', flex: 4, hideOnTablet: true), NColumn('Status')],
             rows: [
-              for (final r in items)
-                [
-                  Text('${r['employeeName'] ?? ''}'),
-                  Text(Fmt.shortDate(r['workDate'])),
-                  Text(Fmt.time(jsonMap(r['checkIn'])['at'])),
-                  Text(Fmt.time(jsonMap(r['checkOut'])['at'])),
-                  Text(Fmt.minutes(r['workedMinutes'])),
-                  Text(
-                    [
-                      if (jsonMap(r['checkIn'])['verification'] != null) Fmt.label(jsonMap(r['checkIn'])['verification']),
-                      if (jsonMap(r['checkIn'])['distanceMeters'] != null) '${jsonMap(r['checkIn'])['distanceMeters']} m',
-                      if (jsonMap(r['checkIn'])['accuracyMeters'] != null) '±${jsonMap(r['checkIn'])['accuracyMeters']} m',
-                      if ((r['flags'] as List? ?? const []).isNotEmpty) '⚑ flagged',
-                    ].join(' · '),
-                    style: t.text.caption(),
-                  ),
-                  StatusChip('${r['status']}'),
-                ],
+              for (final r in items) ...[
+                () {
+                  final cIn = jsonMap(r['checkIn']);
+                  final cOut = jsonMap(r['checkOut']);
+                  final inLat = cIn['latitude'];
+                  final inLng = cIn['longitude'];
+                  final outLat = cOut['latitude'];
+                  final outLng = cOut['longitude'];
+                  final hasLoc = (inLat != null && inLng != null) || (outLat != null && outLng != null);
+                  return [
+                    Text('${r['employeeName'] ?? ''}'),
+                    Text(Fmt.shortDate(r['workDate'])),
+                    Text(Fmt.time(cIn['at'])),
+                    Text(Fmt.time(cOut['at'])),
+                    Text(Fmt.minutes(r['workedMinutes'])),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          [
+                            if (cIn['verification'] != null) Fmt.label(cIn['verification']),
+                            if (cIn['distanceMeters'] != null) '${cIn['distanceMeters']} m',
+                            if (cIn['accuracyMeters'] != null) '±${cIn['accuracyMeters']} m',
+                            if ((r['flags'] as List? ?? const []).isNotEmpty) '⚑ flagged',
+                          ].join(' · '),
+                          style: t.text.caption(),
+                        ),
+                        if (hasLoc) ...[
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: [
+                              if (inLat != null && inLng != null)
+                                InkWell(
+                                  onTap: () => bridge.openUrl('https://www.google.com/maps?q=$inLat,$inLng'),
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.location_on_rounded, size: 14, color: t.accent),
+                                        const SizedBox(width: 2),
+                                        Text('In Map', style: t.text.caption(weight: FontWeight.w600).copyWith(color: t.accent, decoration: TextDecoration.underline)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              if (outLat != null && outLng != null)
+                                InkWell(
+                                  onTap: () => bridge.openUrl('https://www.google.com/maps?q=$outLat,$outLng'),
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.location_on_outlined, size: 14, color: t.teal),
+                                        const SizedBox(width: 2),
+                                        Text('Out Map', style: t.text.caption(weight: FontWeight.w600).copyWith(color: t.teal, decoration: TextDecoration.underline)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                    StatusChip('${r['status']}'),
+                  ];
+                }(),
+              ],
             ],
           ),
         ),
@@ -389,24 +447,38 @@ class _FlagsTabState extends State<FlagsTab> {
                   NGlassCard(
                     blur: false,
                     padding: const EdgeInsets.all(14),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                      Row(children: [
-                        Expanded(child: Text('${f['employeeName'] ?? 'Employee'} · ${_flagText[f['type']] ?? Fmt.label(f['type'])}', style: t.text.body(weight: FontWeight.w600))),
-                        StatusChip('${f['severity']}'),
-                      ]),
-                      const SizedBox(height: 4),
-                      Text('${Fmt.dateTime(f['createdAt'])}${jsonMap(f['details']).isEmpty ? '' : ' · ${jsonMap(f['details']).entries.map((e) => '${Fmt.label(e.key)}: ${e.value}').join(', ')}'}', style: t.text.caption()),
-                      if (f['reviewNote'] != null) Text('Note: ${f['reviewNote']}', style: t.text.caption()),
-                      if (_status == 'open') ...[
+                    child: () {
+                      final det = jsonMap(f['details']);
+                      final fLat = det['latitude'];
+                      final fLng = det['longitude'];
+                      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        Row(children: [
+                          Expanded(child: Text('${f['employeeName'] ?? 'Employee'} · ${_flagText[f['type']] ?? Fmt.label(f['type'])}', style: t.text.body(weight: FontWeight.w600))),
+                          StatusChip('${f['severity']}'),
+                        ]),
+                        const SizedBox(height: 4),
+                        Text('${Fmt.dateTime(f['createdAt'])}${det.isEmpty ? '' : ' · ${det.entries.map((e) => '${Fmt.label(e.key)}: ${e.value}').join(', ')}'}', style: t.text.caption()),
+                        if (f['reviewNote'] != null) Text('Note: ${f['reviewNote']}', style: t.text.caption()),
                         const SizedBox(height: 10),
                         Wrap(spacing: 8, runSpacing: 8, children: [
-                          NButton(label: 'Fine', compact: true, variant: NButtonVariant.secondary, onPressed: () => _review(f, 'reviewed_ok')),
-                          NButton(label: 'Concern', compact: true, variant: NButtonVariant.secondary, onPressed: () => _review(f, 'reviewed_concern')),
-                          NButton(label: 'Dismiss', compact: true, variant: NButtonVariant.secondary, onPressed: () => _review(f, 'dismissed')),
-                          if (canEvidence && f['attendanceId'] != null) NButton(label: 'View evidence', icon: Icons.photo_rounded, compact: true, variant: NButtonVariant.secondary, onPressed: () => _evidence(f)),
+                          if (_status == 'open') ...[
+                            NButton(label: 'Fine', compact: true, variant: NButtonVariant.secondary, onPressed: () => _review(f, 'reviewed_ok')),
+                            NButton(label: 'Concern', compact: true, variant: NButtonVariant.secondary, onPressed: () => _review(f, 'reviewed_concern')),
+                            NButton(label: 'Dismiss', compact: true, variant: NButtonVariant.secondary, onPressed: () => _review(f, 'dismissed')),
+                          ],
+                          if (fLat != null && fLng != null)
+                            NButton(
+                              label: 'View on Map',
+                              icon: Icons.map_rounded,
+                              compact: true,
+                              variant: NButtonVariant.secondary,
+                              onPressed: () => bridge.openUrl('https://www.google.com/maps?q=$fLat,$fLng'),
+                            ),
+                          if (canEvidence && f['attendanceId'] != null)
+                            NButton(label: 'View evidence', icon: Icons.photo_rounded, compact: true, variant: NButtonVariant.secondary, onPressed: () => _evidence(f)),
                         ]),
-                      ],
-                    ]),
+                      ]);
+                    }(),
                   ),
               ].expand((w) => [w, const SizedBox(height: 10)]).toList()),
       ),

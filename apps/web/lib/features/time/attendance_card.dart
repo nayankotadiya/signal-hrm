@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -144,19 +145,7 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     setState(() => _problem = null);
     final body = <String, dynamic>{};
     try {
-      // 1. Direct camera selfie verification first so camera opens immediately on button click
-      if (needSelfie) {
-        setState(() => _phase = _Phase.selfie);
-        final locName = jsonMap(today['location'])['name'] as String?;
-        final id = await _takeSelfie(isCheckIn, locName, stepTitle: stepTitle);
-        if (id == null) {
-          setState(() => _phase = _Phase.idle);
-          return;
-        }
-        body['selfieFileId'] = id;
-      }
-
-      // 2. Geolocation verification
+      // 1. Geolocation verification first so we know if user is inside or outside company area
       if (needLocation) {
         setState(() => _phase = _Phase.locating);
         try {
@@ -184,6 +173,33 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
           body['longitude'] = _lastFix!.longitude;
           body['accuracyMeters'] = _lastFix!.accuracyMeters;
         }
+      }
+
+      // Check if user is outside company area
+      final loc = jsonMap(today['location']);
+      bool isOutsideCompany = false;
+      if (_lastFix != null && loc['latitude'] != null && loc['longitude'] != null) {
+        final dist = _haversineMeters(
+          _lastFix!.latitude,
+          _lastFix!.longitude,
+          (loc['latitude'] as num).toDouble(),
+          (loc['longitude'] as num).toDouble(),
+        );
+        final radius = (loc['radiusMeters'] as num?)?.toDouble() ?? 100.0;
+        isOutsideCompany = dist > radius;
+      }
+
+      // 2. Selfie verification: ONLY when inside company area!
+      // When outside company area, selfie is skipped per company policy
+      if (needSelfie && !isOutsideCompany) {
+        setState(() => _phase = _Phase.selfie);
+        final locName = loc['name'] as String?;
+        final id = await _takeSelfie(isCheckIn, locName, stepTitle: stepTitle);
+        if (id == null) {
+          setState(() => _phase = _Phase.idle);
+          return;
+        }
+        body['selfieFileId'] = id;
       }
 
       if (exceptionReason != null) body['exceptionReason'] = exceptionReason;
@@ -236,6 +252,19 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
       setState(() => _phase = _Phase.idle);
       showError(context, e);
     }
+  }
+
+  double _haversineMeters(double lat1, double lon1, double lat2, double lon2) {
+    const r = 6371000.0;
+    final dLat = (lat2 - lat1) * (math.pi / 180.0);
+    final dLon = (lon2 - lon1) * (math.pi / 180.0);
+    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(lat1 * (math.pi / 180.0)) *
+            math.cos(lat2 * (math.pi / 180.0)) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    return r * c;
   }
 
   Future<void> _resetDemo() async {
@@ -454,6 +483,15 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     final s2In = s2CheckIn['at'] as String?;
     final s2Out = s2CheckOut['at'] as String? ?? (step == 4 ? recCheckOut['at'] as String? : null);
 
+    final s1InLat = s1CheckIn['latitude'] ?? recCheckIn['latitude'];
+    final s1InLng = s1CheckIn['longitude'] ?? recCheckIn['longitude'];
+    final s2InLat = s2CheckIn['latitude'];
+    final s2InLng = s2CheckIn['longitude'];
+    final s2OutLat = s2CheckOut['latitude'] ?? recCheckOut['latitude'];
+    final s2OutLng = s2CheckOut['longitude'] ?? recCheckOut['longitude'];
+    final s2Lat = s2OutLat ?? s2InLat;
+    final s2Lng = s2OutLng ?? s2InLng;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
@@ -503,6 +541,27 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                             : 'Not started',
                         style: t.text.caption().copyWith(color: t.muted),
                       ),
+                      if (s1InLat != null && s1InLng != null) ...[
+                        const SizedBox(height: 3),
+                        InkWell(
+                          onTap: () => bridge.openUrl('https://www.google.com/maps?q=$s1InLat,$s1InLng'),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.location_on_rounded, size: 12, color: t.accent),
+                              const SizedBox(width: 2),
+                              Text(
+                                'View on Google Maps',
+                                style: t.text.caption(weight: FontWeight.w600).copyWith(
+                                      color: t.accent,
+                                      fontSize: 10,
+                                      decoration: TextDecoration.underline,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -606,6 +665,27 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                               : 'Pending break return',
                           style: t.text.caption().copyWith(color: t.muted),
                         ),
+                        if (s2Lat != null && s2Lng != null) ...[
+                          const SizedBox(height: 3),
+                          InkWell(
+                            onTap: () => bridge.openUrl('https://www.google.com/maps?q=$s2Lat,$s2Lng'),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.location_on_rounded, size: 12, color: t.accent),
+                                const SizedBox(width: 2),
+                                Text(
+                                  'View on Google Maps',
+                                  style: t.text.caption(weight: FontWeight.w600).copyWith(
+                                        color: t.accent,
+                                        fontSize: 10,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
