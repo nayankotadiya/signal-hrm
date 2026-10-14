@@ -48,8 +48,16 @@ export class UsersService {
   async list(ctx: Ctx, q: ListQuery & { role?: string }): Promise<Paged<any>> {
     PermissionsService.require(ctx, 'users', 'view', 'organization');
     const filter: Record<string, unknown> = { organizationId: ctx.orgOid };
+    if (!ctx.authz.isSuperAdmin) {
+      filter.role = { $ne: 'super_admin' };
+    }
     if (q.status) filter.status = q.status;
-    if (q.role) filter.role = q.role;
+    if (q.role) {
+      if (q.role === 'super_admin' && !ctx.authz.isSuperAdmin) {
+        return { items: [], page: q.page, limit: q.limit, total: 0, hasMore: false };
+      }
+      filter.role = q.role;
+    }
     if (q.q) {
       const rx = new RegExp(escapeRegex(q.q), 'i');
       filter.$or = [{ fullName: rx }, { email: rx }, { phone: rx }];
@@ -63,8 +71,11 @@ export class UsersService {
 
   async get(ctx: Ctx, id: string): Promise<any> {
     if (id !== ctx.user.userId) PermissionsService.require(ctx, 'users', 'view', 'organization');
-    const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }, PUBLIC_FIELDS).lean();
+    const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }, PUBLIC_FIELDS).lean<any>();
     if (!user) throw notFound('User');
+    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin && String(user._id) !== ctx.user.userId) {
+      throw notFound('User');
+    }
     return serialize(user);
   }
 
@@ -151,6 +162,7 @@ export class UsersService {
     PermissionsService.require(ctx, 'users', 'create', 'organization');
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
+    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('User');
     if (user.status !== 'invited') throw conflict('ALREADY_ACTIVE', 'This person already accepted their invitation.');
     await this.invite(ctx, user);
     return { sent: true };
@@ -169,8 +181,8 @@ export class UsersService {
     if (!passwordLoginOn) throw conflict('PASSWORD_LOGIN_DISABLED', 'Turn on password sign-in first (server setting PASSWORD_LOGIN or Security settings).');
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
+    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('User');
     if (String(user._id) === ctx.user.userId) throw forbidden('SELF_TEMP_PASSWORD', 'Change your own password from your account page.');
-    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw forbidden('SUPER_ADMIN_PROTECTED', 'Only a Super Admin can reset another Super Admin.');
     if (['suspended', 'blocked', 'inactive'].includes(user.status)) throw conflict('ACCOUNT_NOT_ACTIVE', 'Reactivate this account before setting a password.');
     const temporary = temporaryPassword();
     const set: Record<string, unknown> = { passwordHash: hashPassword(temporary), mustChangePassword: true, passwordSetAt: new Date(), failedLogins: 0, lockedUntil: null };
@@ -186,8 +198,8 @@ export class UsersService {
     PermissionsService.require(ctx, 'users', 'manage', 'organization');
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
+    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('User');
     if (String(user._id) === ctx.user.userId) throw forbidden('SELF_STATUS', "You can't change your own account status.");
-    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw forbidden('SUPER_ADMIN_PROTECTED', 'Only a Super Admin can change another Super Admin.');
     if (user.role === 'super_admin' && status !== 'active') {
       const others = await this.users.countDocuments({ organizationId: ctx.orgOid, role: 'super_admin', status: 'active', _id: { $ne: user._id } });
       if (others === 0) throw conflict('LAST_SUPER_ADMIN', 'The last active Super Admin cannot be suspended.');
@@ -202,8 +214,8 @@ export class UsersService {
   async setRole(ctx: Ctx, id: string, role: RoleKey): Promise<any> {
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
+    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('User');
     if (String(user._id) === ctx.user.userId) throw forbidden('SELF_ROLE', "You can't change your own role.");
-    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw forbidden('SUPER_ADMIN_PROTECTED', 'Only a Super Admin can change another Super Admin.');
     if (role === 'super_admin') throw forbidden('USE_SUPER_ADMIN_FLOW', 'Create Super Admins from Security with re-authentication.');
     if (!PermissionsService.canAssignRole(ctx, role)) throw forbidden('GRANT_AUTHORITY', "You can't assign a role with permissions you don't hold.");
     if (user.role === 'super_admin') {
@@ -222,6 +234,7 @@ export class UsersService {
     if (!PermissionsService.canGrant(ctx, grant)) throw forbidden('GRANT_AUTHORITY', "You can't grant a permission you don't hold at that scope.");
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
+    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('User');
     await this.userPerms.updateOne(
       { organizationId: ctx.orgOid, userId: user._id, grant },
       { $set: { recordIds, reason, expiresAt, grantedBy: ctx.userOid } },
@@ -236,6 +249,9 @@ export class UsersService {
 
   async removeGrant(ctx: Ctx, id: string, grant: string): Promise<any> {
     if (!PermissionsService.canGrant(ctx, grant)) throw forbidden('GRANT_AUTHORITY', "You can't remove a permission you couldn't grant.");
+    const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
+    if (!user) throw notFound('User');
+    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('User');
     const r = await this.userPerms.deleteOne({ organizationId: ctx.orgOid, userId: oid(id), grant });
     if (!r.deletedCount) throw notFound('Permission');
     await this.users.updateOne({ _id: oid(id) }, { $inc: { permissionsVersion: 1 } });
@@ -250,6 +266,7 @@ export class UsersService {
     PermissionsService.require(ctx, 'roles', 'view', 'organization');
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
+    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin && String(user._id) !== ctx.user.userId) throw notFound('User');
     const grants = await this.perms.grantsFor({ userId: String(user._id), orgId: ctx.user.orgId, role: user.role, sessionId: '', name: user.fullName }, user.permissionsVersion);
     const extras = await this.userPerms.find({ organizationId: ctx.orgOid, userId: user._id }).lean();
     return { role: user.role, effective: PermissionsService.describe(PermissionsService.build(grants, user.role)), individual: serialize(extras) };

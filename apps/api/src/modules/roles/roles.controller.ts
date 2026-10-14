@@ -24,15 +24,20 @@ export class RolesController {
   /** Catalog for the permission matrix UI. */
   @Get('catalog')
   @Can('roles', 'view')
-  catalog() {
-    return { resources: RESOURCES, actions: ACTIONS, scopes: SCOPES, roles: ROLES, defaults: DEFAULT_ROLE_GRANTS };
+  catalog(@C() ctx: Ctx) {
+    const roles = ctx.authz.isSuperAdmin ? ROLES : ROLES.filter((r) => r !== 'super_admin');
+    return { resources: RESOURCES, actions: ACTIONS, scopes: SCOPES, roles, defaults: DEFAULT_ROLE_GRANTS };
   }
 
   @Get()
   @Can('roles', 'view')
   async list(@C() ctx: Ctx) {
-    const rows = await this.roles.find({ organizationId: ctx.orgOid }).sort({ key: 1 }).lean<any[]>();
-    const counts = await this.users.aggregate([{ $match: { organizationId: ctx.orgOid } }, { $group: { _id: '$role', n: { $sum: 1 } } }]);
+    const filter: Record<string, unknown> = { organizationId: ctx.orgOid };
+    if (!ctx.authz.isSuperAdmin) filter.key = { $ne: 'super_admin' };
+    const rows = await this.roles.find(filter).sort({ key: 1 }).lean<any[]>();
+    const matchUsers: Record<string, unknown> = { organizationId: ctx.orgOid };
+    if (!ctx.authz.isSuperAdmin) matchUsers.role = { $ne: 'super_admin' };
+    const counts = await this.users.aggregate([{ $match: matchUsers }, { $group: { _id: '$role', n: { $sum: 1 } } }]);
     const countOf = new Map(counts.map((c: any) => [c._id, c.n]));
     return { items: serialize(rows).map((r: any) => ({ ...r, userCount: countOf.get(r.key) ?? 0 })) };
   }
@@ -46,7 +51,10 @@ export class RolesController {
   @RequireReauth()
   async update(@C() ctx: Ctx, @Param('key') key: string, @Body() body: unknown) {
     const b = parse(z.object({ grants: z.array(z.string()).max(500), name: z.string().max(60).optional(), description: z.string().max(300).optional() }), body);
-    if (key === 'super_admin') throw forbidden('SUPER_ADMIN_FIXED', "The Super Admin role always has every permission and can't be edited.");
+    if (key === 'super_admin') {
+      if (!ctx.authz.isSuperAdmin) throw notFound('Role');
+      throw forbidden('SUPER_ADMIN_FIXED', "The Super Admin role always has every permission and can't be edited.");
+    }
     const role = await this.roles.findOne({ organizationId: ctx.orgOid, key }).lean<any>();
     if (!role) throw notFound('Role');
     for (const g of b.grants) if (!parseGrant(g)) throw badRequest('GRANT_INVALID', `"${g}" is not a valid permission.`, 'grants');

@@ -202,7 +202,7 @@ export class EmployeesService implements OnModuleInit {
       manager: manager ? { id: String(manager._id), name: `${manager.firstName} ${manager.lastName ?? ''}`.trim(), designation: manager.designation } : null,
       location: serialize(location),
       shift: serialize(shift),
-      account: user ? serialize(user) : null,
+      account: user && (user.role !== 'super_admin' || ctx.authz.isSuperAdmin) ? serialize(user) : null,
       can: {
         edit: await this.scope.covers(ctx, 'employees', 'edit', e._id),
         editSensitive: await this.canSensitive(ctx, e._id, 'edit'),

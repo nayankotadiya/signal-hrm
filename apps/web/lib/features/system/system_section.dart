@@ -341,7 +341,7 @@ class _SecurityTabState extends State<SecurityTab> {
           NKpi(label: 'Locked accounts', value: o['lockedAccounts'] as num?, size: 34),
           NKpi(label: 'Open alerts', value: o['openAlerts'] as num?, size: 34),
           NKpi(label: 'Active sessions', value: o['activeSessions'] as num?, size: 34),
-          NKpi(label: 'Super Admins', value: o['superAdmins'] as num?, size: 34),
+          if (context.me.isSuperAdmin) NKpi(label: 'Super Admins', value: o['superAdmins'] as num?, size: 34),
         ]),
       ),
       const SizedBox(height: 14),
@@ -396,25 +396,30 @@ class _SecurityTabState extends State<SecurityTab> {
             path: '/security/sessions',
             reloadKey: _rev,
             emptyTitle: 'No active sessions',
-            itemBuilder: (context, s, reload) => NListRow(
-              dense: true,
-              title: '${s['userName'] ?? s['userId']} · ${s['deviceName'] ?? 'Browser'}',
-              subtitle: '${Fmt.label(s['provider'])} · last used ${Fmt.relative(s['lastUsedAt'])}${s['ip'] != null ? ' · ${s['ip']}' : ''}',
-              trailing: manage
-                  ? IconButton(
-                      tooltip: 'Revoke session',
-                      icon: const Icon(Icons.logout_rounded, size: 18),
-                      onPressed: () async {
-                        try {
-                          await context.api.post('/security/sessions/${s['id']}/revoke');
-                          reload();
-                        } catch (e) {
-                          if (context.mounted) showError(context, e);
-                        }
-                      },
-                    )
-                  : null,
-            ),
+            itemBuilder: (context, s, reload) {
+              if (s['role'] == 'super_admin' && !context.me.isSuperAdmin) {
+                return const SizedBox.shrink();
+              }
+              return NListRow(
+                dense: true,
+                title: '${s['userName'] ?? s['userId']} · ${s['deviceName'] ?? 'Browser'}',
+                subtitle: '${Fmt.label(s['provider'])} · last used ${Fmt.relative(s['lastUsedAt'])}${s['ip'] != null ? ' · ${s['ip']}' : ''}',
+                trailing: manage
+                    ? IconButton(
+                        tooltip: 'Revoke session',
+                        icon: const Icon(Icons.logout_rounded, size: 18),
+                        onPressed: () async {
+                          try {
+                            await context.api.post('/security/sessions/${s['id']}/revoke');
+                            reload();
+                          } catch (e) {
+                            if (context.mounted) showError(context, e);
+                          }
+                        },
+                      )
+                    : null,
+              );
+            },
           ),
         _ => PagedList(
             path: '/security/permission-changes',

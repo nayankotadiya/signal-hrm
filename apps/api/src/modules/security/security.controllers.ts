@@ -145,10 +145,18 @@ export class AuditController {
   constructor(
     private readonly audit: AuditService,
     @InjectModel('AuditLog') private readonly logs: Model<any>,
+    @InjectModel('User') private readonly users: Model<any>,
   ) {}
 
-  private filter(ctx: Ctx, b: z.infer<typeof auditQuery>): Record<string, unknown> {
+  private async filter(ctx: Ctx, b: z.infer<typeof auditQuery>): Promise<Record<string, unknown>> {
     const f: Record<string, any> = { organizationId: ctx.orgOid };
+    if (!ctx.authz.isSuperAdmin) {
+      const superAdmins = await this.users.find({ organizationId: ctx.orgOid, role: 'super_admin' }, { _id: 1 }).lean<any[]>();
+      const saIds = superAdmins.map((s) => s._id);
+      const saIdStrs = superAdmins.map((s) => String(s._id));
+      f.actorId = { $nin: saIds };
+      f.resourceId = { $nin: saIdStrs };
+    }
     if (b.actorId) f.actorId = oid(b.actorId);
     if (b.resourceType) f.resourceType = b.resourceType;
     if (b.resourceId) f.resourceId = b.resourceId;
@@ -162,7 +170,7 @@ export class AuditController {
   @Can('audit', 'view', 'organization')
   async list(@C() ctx: Ctx, @Query() q: unknown) {
     const b = parse(auditQuery, q);
-    const f = this.filter(ctx, b);
+    const f = await this.filter(ctx, b);
     const [items, total] = await Promise.all([this.logs.find(f).sort({ at: -1 }).skip((b.page - 1) * b.limit).limit(b.limit).lean(), this.logs.countDocuments(f)]);
     return { items: serialize(items), page: b.page, limit: b.limit, total, hasMore: b.page * b.limit < total };
   }
@@ -171,6 +179,10 @@ export class AuditController {
   @Get('records/:type/:id')
   @Can('audit', 'view', 'organization')
   async replay(@C() ctx: Ctx, @Param('type') type: string, @Param('id') id: string) {
+    if (type === 'user' && !ctx.authz.isSuperAdmin) {
+      const u = await this.users.findById(id, { role: 1 }).lean<any>();
+      if (u?.role === 'super_admin') throw notFound('Record');
+    }
     const items = await this.logs.find({ organizationId: ctx.orgOid, resourceType: type, resourceId: id }).sort({ at: 1 }).limit(1000).lean();
     return { items: serialize(items) };
   }
@@ -179,7 +191,8 @@ export class AuditController {
   @Can('audit', 'export', 'organization')
   async export(@C() ctx: Ctx, @Query() q: unknown, @Res() res: Response) {
     const b = parse(auditQuery, q);
-    const rows = await this.logs.find(this.filter(ctx, b)).sort({ at: -1 }).limit(50_000).lean<any[]>();
+    const f = await this.filter(ctx, b);
+    const rows = await this.logs.find(f).sort({ at: -1 }).limit(50_000).lean<any[]>();
     const cell = (v: unknown) => `"${String(v ?? '').replace(/^[=+\-@]/, "'$&").replace(/"/g, '""')}"`;
     const csv = ['at,actor,action,resource_type,resource_id,outcome,correlation_id,changes', ...rows.map((r) => [new Date(r.at).toISOString(), r.actorName ?? r.actorId, r.action, r.resourceType, r.resourceId, r.outcome, r.correlationId, r.changes ? JSON.stringify(r.changes) : ''].map(cell).join(','))].join('\n');
     await this.audit.record(ctx, { action: 'audit.export', resourceType: 'audit', changes: { rows: { from: null, to: rows.length } } });
@@ -217,7 +230,7 @@ export class SecurityController {
       this.sessionModel.countDocuments({ organizationId: ctx.orgOid, revokedAt: null, expiresAt: { $gt: new Date() } }),
       this.users.countDocuments({ organizationId: ctx.orgOid, role: 'super_admin', status: 'active' }),
     ]);
-    return { failedLogins24h: failed24h, lockedAccounts: locked, openAlerts, activeSessions, superAdmins };
+    return { failedLogins24h: failed24h, lockedAccounts: locked, openAlerts, activeSessions, superAdmins: ctx.authz.isSuperAdmin ? superAdmins : 0 };
   }
 
   @Get('logins')
@@ -225,6 +238,14 @@ export class SecurityController {
   async logins_(@C() ctx: Ctx, @Query() q: unknown) {
     const b = parse(listQuery.extend({ userId: objectId.optional(), outcome: z.string().optional() }), q);
     const f: Record<string, unknown> = { organizationId: ctx.orgOid };
+    if (!ctx.authz.isSuperAdmin) {
+      const superAdmins = await this.users.find({ organizationId: ctx.orgOid, role: 'super_admin' }, { _id: 1 }).lean<any[]>();
+      const superAdminIds = superAdmins.map((s) => s._id);
+      if (b.userId && superAdminIds.some((id) => String(id) === String(b.userId))) {
+        return { items: [], page: b.page, limit: b.limit, total: 0, hasMore: false };
+      }
+      f.userId = { $nin: superAdminIds };
+    }
     if (b.userId) f.userId = oid(b.userId);
     if (b.outcome) f.outcome = b.outcome;
     const [items, total] = await Promise.all([this.logins.find(f).sort({ at: -1 }).skip((b.page - 1) * b.limit).limit(b.limit).lean(), this.logins.countDocuments(f)]);
@@ -237,6 +258,14 @@ export class SecurityController {
   async allSessions(@C() ctx: Ctx, @Query() q: unknown) {
     const b = parse(listQuery.extend({ userId: objectId.optional() }), q);
     const f: Record<string, unknown> = { organizationId: ctx.orgOid, revokedAt: null, expiresAt: { $gt: new Date() } };
+    if (!ctx.authz.isSuperAdmin) {
+      const superAdmins = await this.users.find({ organizationId: ctx.orgOid, role: 'super_admin' }, { _id: 1 }).lean<any[]>();
+      const superAdminIds = superAdmins.map((s) => s._id);
+      if (b.userId && superAdminIds.some((id) => String(id) === String(b.userId))) {
+        return { items: [], page: b.page, limit: b.limit, total: 0, hasMore: false };
+      }
+      f.userId = { $nin: superAdminIds };
+    }
     if (b.userId) f.userId = oid(b.userId);
     const [rows, total] = await Promise.all([this.sessionModel.find(f, { refreshHash: 0, family: 0 }).sort({ lastUsedAt: -1 }).skip((b.page - 1) * b.limit).limit(b.limit).lean<any[]>(), this.sessionModel.countDocuments(f)]);
     const users = await this.users.find({ _id: { $in: rows.map((r) => r.userId) } }, { fullName: 1, role: 1 }).lean<any[]>();
@@ -251,7 +280,7 @@ export class SecurityController {
     const s = await this.sessionModel.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!s) throw notFound('Session');
     const target = await this.users.findById(s.userId, { role: 1 }).lean<any>();
-    if (target?.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw forbidden('SUPER_ADMIN_PROTECTED', "Only a Super Admin can sign out a Super Admin's session.");
+    if (target?.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('Session');
     await this.sessions.revoke(id, 'admin_revoked');
     await this.audit.record(ctx, { action: 'session.admin_revoke', resourceType: 'session', resourceId: id });
     return { revoked: true };
@@ -263,7 +292,7 @@ export class SecurityController {
   async signOutUser(@C() ctx: Ctx, @Param('id') id: string) {
     const target = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }, { role: 1 }).lean<any>();
     if (!target) throw notFound('User');
-    if (target.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw forbidden('SUPER_ADMIN_PROTECTED', 'Only a Super Admin can sign out a Super Admin.');
+    if (target.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('User');
     const n = await this.sessions.revokeAll(target._id, 'admin_revoked_all');
     await this.audit.record(ctx, { action: 'session.revoke_all', resourceType: 'user', resourceId: id, changes: { sessions: { from: null, to: n } } });
     return { revoked: n };
@@ -273,8 +302,9 @@ export class SecurityController {
   @Can('security', 'manage', 'organization')
   @HttpCode(200)
   async unlock(@C() ctx: Ctx, @Param('id') id: string) {
+    const target = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }, { role: 1 }).lean<any>();
+    if (!target || (target.role === 'super_admin' && !ctx.authz.isSuperAdmin)) throw notFound('User');
     const r = await this.users.updateOne({ _id: oid(id), organizationId: ctx.orgOid }, { $set: { lockedUntil: null, failedLogins: 0 } });
-    if (!r.matchedCount) throw notFound('User');
     await this.audit.record(ctx, { action: 'user.unlock', resourceType: 'user', resourceId: id });
     return { unlocked: true };
   }
@@ -284,6 +314,12 @@ export class SecurityController {
   async listAlerts(@C() ctx: Ctx, @Query() q: unknown) {
     const b = parse(listQuery, q);
     const f: Record<string, unknown> = { organizationId: ctx.orgOid, status: b.status ?? { $in: ['open', 'acknowledged'] } };
+    if (!ctx.authz.isSuperAdmin) {
+      const superAdmins = await this.users.find({ organizationId: ctx.orgOid, role: 'super_admin' }, { _id: 1 }).lean<any[]>();
+      const saIds = superAdmins.map((s) => s._id);
+      f.userId = { $nin: saIds };
+      f.type = { $ne: 'new_super_admin' };
+    }
     const [items, total] = await Promise.all([this.alerts.find(f).sort({ createdAt: -1 }).skip((b.page - 1) * b.limit).limit(b.limit).lean(), this.alerts.countDocuments(f)]);
     return { items: serialize(items), page: b.page, limit: b.limit, total, hasMore: b.page * b.limit < total };
   }
@@ -303,7 +339,15 @@ export class SecurityController {
   @Can('security', 'view', 'organization')
   async permissionChanges(@C() ctx: Ctx, @Query() q: unknown) {
     const b = parse(listQuery, q);
-    const [items, total] = await Promise.all([this.changes.find({ organizationId: ctx.orgOid }).sort({ at: -1 }).skip((b.page - 1) * b.limit).limit(b.limit).lean(), this.changes.countDocuments({ organizationId: ctx.orgOid })]);
+    const f: Record<string, unknown> = { organizationId: ctx.orgOid };
+    if (!ctx.authz.isSuperAdmin) {
+      const superAdmins = await this.users.find({ organizationId: ctx.orgOid, role: 'super_admin' }, { _id: 1 }).lean<any[]>();
+      const saIds = superAdmins.map((s) => s._id);
+      f.actorId = { $nin: saIds };
+      f.targetUserId = { $nin: saIds };
+      f.roleKey = { $ne: 'super_admin' };
+    }
+    const [items, total] = await Promise.all([this.changes.find(f).sort({ at: -1 }).skip((b.page - 1) * b.limit).limit(b.limit).lean(), this.changes.countDocuments(f)]);
     return { items: serialize(items), page: b.page, limit: b.limit, total, hasMore: b.page * b.limit < total };
   }
 

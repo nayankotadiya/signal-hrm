@@ -599,6 +599,7 @@ class _UsersTabState extends State<UsersTab> {
 
   Future<void> _manage(Json u) async {
     final me = context.me;
+    if (u['role'] == 'super_admin' && !me.isSuperAdmin && u['id'] != me.userId) return;
     await showNSheet<void>(
       context,
       title: '${u['fullName']}',
@@ -695,20 +696,26 @@ class _UsersTabState extends State<UsersTab> {
         reloadKey: '$_q|$_status|$_rev',
         emptyTitle: 'No users',
         itemBuilder: (_, __, ___) => const SizedBox.shrink(),
-        wrap: (context, items, _) => NDataTable(
-          columns: const [NColumn('Name', flex: 3), NColumn('Email', flex: 3, hideOnTablet: true), NColumn('Role'), NColumn('Last sign-in', hideOnTablet: true), NColumn('Status')],
-          onTapRow: (i) => _manage(items[i]),
-          rows: [
+        wrap: (context, items, _) {
+          final visibleItems = [
             for (final u in items)
-              [
-                Text('${u['fullName']}'),
-                Text('${u['email'] ?? u['phone'] ?? ''}'),
-                Text(Fmt.label(u['role'])),
-                Text(u['lastLoginAt'] == null ? 'Never' : Fmt.relative(u['lastLoginAt'])),
-                StatusChip('${u['status']}'),
-              ],
-          ],
-        ),
+              if (u['role'] != 'super_admin' || me.isSuperAdmin) u
+          ];
+          return NDataTable(
+            columns: const [NColumn('Name', flex: 3), NColumn('Email', flex: 3, hideOnTablet: true), NColumn('Role'), NColumn('Last sign-in', hideOnTablet: true), NColumn('Status')],
+            onTapRow: (i) => _manage(visibleItems[i]),
+            rows: [
+              for (final u in visibleItems)
+                [
+                  Text('${u['fullName']}'),
+                  Text('${u['email'] ?? u['phone'] ?? ''}'),
+                  Text(Fmt.label(u['role'])),
+                  Text(u['lastLoginAt'] == null ? 'Never' : Fmt.relative(u['lastLoginAt'])),
+                  StatusChip('${u['status']}'),
+                ],
+            ],
+          );
+        },
       ),
     ]);
   }
@@ -806,7 +813,9 @@ class _RolesTabState extends State<RolesTab> {
       },
       builder: (context, d, reload) {
         final catalog = jsonMap(d['catalog']);
-        final roles = jsonList(d['roles']);
+        final allRoles = jsonList(d['roles']);
+        final roles = [for (final r in allRoles) if (r['key'] != 'super_admin' || me.isSuperAdmin) r];
+        if (roles.isEmpty) return const SizedBox.shrink();
         final resources = jsonMap(catalog['resources']);
         final actions = [for (final a in (catalog['actions'] as List? ?? const [])) '$a'];
         final role = roles.firstWhere((r) => r['key'] == (_role ?? roles.first['key']), orElse: () => roles.first);
