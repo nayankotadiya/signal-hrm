@@ -3,6 +3,16 @@ import Redis from 'ioredis';
 import { APP_CONFIG } from '../config/config.module';
 import type { AppEnv } from '../config/env.schema';
 
+function normalizeRedisUrl(raw: string): string {
+  let url = raw.trim();
+  const match = url.match(/(rediss?:\/\/[^\s'"]+)/);
+  if (match) url = match[1];
+  if ((raw.includes('--tls') || url.includes('.upstash.io')) && url.startsWith('redis://')) {
+    url = 'rediss://' + url.slice('redis://'.length);
+  }
+  return url;
+}
+
 /** Shared Redis client for cache, rate-limit storage, idempotency keys and queues (later phases). */
 @Injectable()
 export class RedisService implements OnModuleInit, OnApplicationShutdown {
@@ -12,7 +22,7 @@ export class RedisService implements OnModuleInit, OnApplicationShutdown {
   constructor(@Inject(APP_CONFIG) private readonly env: AppEnv) {}
 
   get configured(): boolean {
-    return Boolean(this.env.REDIS_URL);
+    return Boolean(this.redis);
   }
 
   get client(): Redis | undefined {
@@ -25,7 +35,7 @@ export class RedisService implements OnModuleInit, OnApplicationShutdown {
       return;
     }
     try {
-      const url = this.env.REDIS_URL.trim();
+      const url = normalizeRedisUrl(this.env.REDIS_URL);
       this.redis = new Redis(url, {
         lazyConnect: false,
         enableOfflineQueue: false,
