@@ -119,6 +119,7 @@ class _LoginPageState extends State<LoginPage> {
     } else {
       bridge.writeLocal('shrm_remembered_email', null);
       bridge.writeLocal('shrm_keep_signed_in', 'false');
+      bridge.writeLocal('shrm_rt', null);
     }
   }
 
@@ -217,31 +218,39 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Widget _buildKeepSignedInRow(NTokens t) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(6),
-      onTap: () => setState(() => _keepSignedIn = !_keepSignedIn),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 18,
-              height: 18,
-              child: Checkbox(
-                value: _keepSignedIn,
-                onChanged: (v) => setState(() => _keepSignedIn = v ?? true),
-                activeColor: t.accent,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => setState(() => _keepSignedIn = !_keepSignedIn),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: _keepSignedIn ? t.accent : Colors.transparent,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: _keepSignedIn ? t.accent : t.muted.withValues(alpha: 0.6),
+                    width: 1.5,
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: _keepSignedIn
+                    ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+                    : null,
               ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'Keep me signed in',
-              style: t.text.caption(color: t.ink).copyWith(fontSize: 13, fontWeight: FontWeight.w500),
-            ),
-          ],
+              const SizedBox(width: 10),
+              Text(
+                'Keep me signed in',
+                style: t.text.body(color: t.ink, weight: FontWeight.w500).copyWith(fontSize: 13.5),
+              ),
+            ],
+          ),
         ),
       ),
     );

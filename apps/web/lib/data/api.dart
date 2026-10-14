@@ -181,20 +181,26 @@ class ApiClient {
     return ApiException(status: res.statusCode, code: 'HTTP_${res.statusCode}', message: 'Something went wrong (${res.statusCode}).', correlationId: res.headers['x-correlation-id']);
   }
 
-  /// Exchanges the refresh cookie for a new access token. Single-flight.
+  /// Exchanges the refresh cookie or saved token for a new access token. Single-flight.
   Future<bool> refresh() {
     return _refreshing ??= () async {
       try {
+        final savedRt = _platform.readLocal('shrm_rt');
         final req = http.Request('POST', uri('/auth/refresh'))
           ..headers.addAll(_headers()..remove('authorization'))
-          ..body = '{}';
+          ..body = jsonEncode({if (savedRt != null && savedRt.isNotEmpty) 'refreshToken': savedRt});
         final res = await http.Response.fromStream(await _client.send(req).timeout(const Duration(seconds: 15)));
         if (res.statusCode != 200) {
+          _platform.writeLocal('shrm_rt', null);
           setToken(null);
           onSession?.call(null);
           return false;
         }
         final j = jsonDecode(utf8.decode(res.bodyBytes)) as Json;
+        final nextRt = j['refreshToken'] as String?;
+        if (nextRt != null && nextRt.isNotEmpty) {
+          _platform.writeLocal('shrm_rt', nextRt);
+        }
         setToken(j['accessToken'] as String?, expiresIn: (j['expiresIn'] as num?)?.toInt());
         onSession?.call(j['me'] as Json?);
         return true;

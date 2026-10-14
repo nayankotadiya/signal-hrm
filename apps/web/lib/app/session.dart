@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../data/api.dart';
+import '../platform/bridge.dart';
 import 'permissions.dart';
 
 enum SessionStatus { unknown, signedOut, signedIn }
@@ -100,6 +101,10 @@ class SessionController extends ChangeNotifier {
   void _signedIn(dynamic j) {
     final m = j as Json;
     api.setToken(m['accessToken'] as String?, expiresIn: (m['expiresIn'] as num?)?.toInt());
+    final rt = m['refreshToken'] as String?;
+    if (rt != null && rt.isNotEmpty) {
+      bridge.writeLocal('shrm_rt', rt);
+    }
     expiredNotice = false;
     _me = null;
     _apply((m['me'] as Map).cast<String, dynamic>());
@@ -126,6 +131,7 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    bridge.writeLocal('shrm_rt', null);
     try {
       await api.post('/auth/logout');
     } catch (_) {

@@ -41,14 +41,13 @@ export class AuthController {
     @InjectModel('Session') private readonly sessionModel: Model<any>,
   ) {}
 
-  /** Response body for every successful sign-in. The refresh token goes in an httpOnly cookie. */
-  private async signedIn(res: Response, s: IssuedSession & { user: any }, includeRefresh = false, rememberMe = true) {
+  /** Response body for every successful sign-in. The refresh token goes in an httpOnly cookie and body. */
+  private async signedIn(res: Response, s: IssuedSession & { user: any }, includeRefresh = true, rememberMe = true) {
     this.sessions.setCookie(res, s.refreshToken, rememberMe ? 30 : undefined);
     return {
       accessToken: s.accessToken,
       expiresIn: s.expiresIn,
       sessionId: s.sessionId,
-      // Non-browser clients (tests, future native apps) may ask for the token in the body.
       ...(includeRefresh ? { refreshToken: s.refreshToken } : {}),
       me: await this.auth.me(String(s.user._id)),
     };
@@ -132,7 +131,7 @@ export class AuthController {
     const presented = (req as any).cookies?.[REFRESH_COOKIE] ?? cookieFrom(req, REFRESH_COOKIE) ?? b.refreshToken;
     try {
       const s = await this.sessions.refresh(presented, client(req));
-      return this.signedIn(res, s, !!b.refreshToken);
+      return this.signedIn(res, s, true, true);
     } catch (e) {
       this.sessions.clearCookie(res);
       throw e;
