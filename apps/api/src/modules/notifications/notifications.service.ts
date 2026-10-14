@@ -99,7 +99,7 @@ export class NotificationsService implements OnModuleInit {
       for (const userId of unique) {
         const ch = prefBy.get(String(userId))?.[input.event] ?? {};
         const inApp = essential || ch.in_app !== false;
-        const email = essential ? true : (ch.email ?? EMAIL_BY_DEFAULT.has(String(input.event)));
+        const email = essential ? true : ch.email !== false;
         const push = essential || ch.push !== false;
         let notificationId: Types.ObjectId | undefined;
         if (inApp) {
@@ -213,9 +213,23 @@ export class NotificationsService implements OnModuleInit {
             continue;
           }
           const tpl = await this.templates.findOne({ organizationId: d.organizationId, event: d.event, channel: 'email', active: true }).lean<any>();
-          const vars: Record<string, string> = { name: user.fullName, title: n.title, body: n.body ?? '', link: n.link ?? '' };
+          const vars: Record<string, string> = { name: user.fullName || user.email, title: n.title, body: n.body ?? '', link: n.link ?? '' };
           const fill = (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_m, k) => vars[k] ?? '');
-          await this.mail.send({ to: user.email, subject: tpl?.subject ? fill(tpl.subject) : n.title, text: tpl?.body ? fill(tpl.body) : `${n.title}\n\n${n.body ?? ''}` });
+          const subject = tpl?.subject ? fill(tpl.subject) : `[Signal HRM] ${n.title}`;
+          const text = tpl?.body ? fill(tpl.body) : `${n.title}\n\n${n.body ?? ''}${n.link ? `\n\nLink: ${this.env.PUBLIC_WEB_URL}${n.link.startsWith('/') ? '' : '/'}${n.link}` : ''}`;
+          const html = `
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+  <div style="margin-bottom: 16px;">
+    <span style="display: inline-block; padding: 4px 10px; background: #e0f2fe; color: #0369a1; border-radius: 6px; font-size: 12px; font-weight: 600; text-transform: uppercase;">Signal HRM</span>
+  </div>
+  <h2 style="margin: 0 0 12px 0; color: #0f172a; font-size: 19px; font-weight: 600; line-height: 1.4;">${n.title}</h2>
+  ${n.body ? `<p style="margin: 0 0 20px 0; color: #334155; font-size: 14.5px; line-height: 1.6;">${n.body.replace(/\n/g, '<br/>')}</p>` : ''}
+  ${n.link ? `<div style="margin-top: 20px;"><a href="${this.env.PUBLIC_WEB_URL}${n.link.startsWith('/') ? '' : '/'}${n.link}" style="display: inline-block; padding: 9px 18px; background: #2563eb; color: #ffffff; text-decoration: none; border-radius: 7px; font-weight: 600; font-size: 13.5px;">Open in Signal HRM</a></div>` : ''}
+  <hr style="margin: 28px 0 14px 0; border: none; border-top: 1px solid #f1f5f9;" />
+  <p style="margin: 0; color: #94a3b8; font-size: 11.5px;">This notification was sent to ${user.fullName || user.email} by Signal HRM.</p>
+</div>`;
+
+          await this.mail.send({ to: user.email, subject, text, html });
           await this.deliveries.updateOne({ _id: d._id }, { $set: { status: 'sent', sentAt: new Date(), error: null } });
           sent++;
         } catch (e) {

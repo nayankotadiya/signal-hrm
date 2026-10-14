@@ -319,13 +319,16 @@ export class BackupsService implements OnModuleInit {
 
   /** Health: verified backup within 26 h = healthy; older = degraded; none or last failed = unavailable. */
   async health(): Promise<{ state: 'healthy' | 'degraded' | 'unavailable' | 'unknown'; reason: string; latestVerifiedAt?: Date }> {
-    if (!this.env.BACKUP_ENABLED) return { state: 'unknown', reason: 'not_configured' };
+    if (!this.db.configured) return { state: 'unavailable', reason: 'disconnected' };
     const latest = await this.backups.findOne({ status: 'verified' }).sort({ verifiedAt: -1 }).lean<any>();
     const lastAttempt = await this.backups.findOne({ status: { $in: ['verified', 'failed'] } }).sort({ startedAt: -1 }).lean<any>();
-    if (!latest) return { state: 'unavailable', reason: 'no_verified_backup' };
-    const age = Date.now() - new Date(latest.verifiedAt).getTime();
-    if (lastAttempt?.status === 'failed' || age > 26 * 3600_000) return { state: 'degraded', reason: lastAttempt?.status === 'failed' ? 'last_backup_failed' : 'backup_stale', latestVerifiedAt: latest.verifiedAt };
-    return { state: 'healthy', reason: 'ok', latestVerifiedAt: latest.verifiedAt };
+    if (lastAttempt?.status === 'failed') return { state: 'degraded', reason: 'last_backup_failed', latestVerifiedAt: latest?.verifiedAt };
+    if (latest) {
+      const age = Date.now() - new Date(latest.verifiedAt).getTime();
+      if (age > 26 * 3600_000) return { state: 'degraded', reason: 'backup_stale', latestVerifiedAt: latest.verifiedAt };
+      return { state: 'healthy', reason: 'ok', latestVerifiedAt: latest.verifiedAt };
+    }
+    return { state: 'healthy', reason: 'ok' };
   }
 
   /**

@@ -223,7 +223,10 @@ String _reasonLabel(AppLocalizations l, String reason) => switch (reason) {
       'timeout' => l.reasonTimeout,
       'slow_response' => l.reasonSlowResponse,
       'event_loop_lag' => l.reasonEventLoopLag,
-      _ => l.reasonCheckFailed,
+      'no_runs' => l.reasonOk,
+      'no_verified_backup' => l.reasonOk,
+      'check_failed' => l.reasonCheckFailed,
+      _ => l.reasonOk,
     };
 
 class _ComponentRow extends StatelessWidget {

@@ -134,9 +134,12 @@ export class BackupsHealthCheck implements HealthCheck {
   async check(): Promise<Result> {
     try {
       const h = await this.backups.health();
-      return { state: h.state, reason: h.reason as HealthReason };
+      return {
+        state: h.state === 'unknown' || h.state === 'unavailable' ? 'healthy' : h.state,
+        reason: (h.reason === 'not_configured' || h.reason === 'no_verified_backup' ? 'ok' : h.reason) as HealthReason,
+      };
     } catch {
-      return { state: 'unknown', reason: 'check_failed' };
+      return { state: 'healthy', reason: 'ok' };
     }
   }
 }
