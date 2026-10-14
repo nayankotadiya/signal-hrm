@@ -69,14 +69,23 @@ class CompositeStorageProvider implements IStorageProvider {
         const mongo = new MongoGridFSStorageProvider(db);
         const local = new LocalDiskStorageProvider(env.LOCAL_STORAGE_DIR);
         let drive: GoogleDriveStorageProvider | undefined;
-        if (env.STORAGE_PROVIDER === 'google_drive' && env.GOOGLE_DRIVE_CREDENTIALS_JSON) {
-          drive = new GoogleDriveStorageProvider(env.GOOGLE_DRIVE_CREDENTIALS_JSON, env.GOOGLE_DRIVE_ROOT_FOLDER_ID);
+        const hasDriveConfig = !!(env.GOOGLE_DRIVE_REFRESH_TOKEN || env.GOOGLE_DRIVE_CREDENTIALS_JSON);
+        if (hasDriveConfig) {
+          const clientId = env.GOOGLE_DRIVE_CLIENT_ID || env.GOOGLE_CLIENT_IDS[0];
+          const clientSecret = env.GOOGLE_DRIVE_CLIENT_SECRET || env.GOOGLE_CLIENT_SECRET;
+          drive = new GoogleDriveStorageProvider({
+            credentialsJson: env.GOOGLE_DRIVE_CREDENTIALS_JSON,
+            clientId,
+            clientSecret,
+            refreshToken: env.GOOGLE_DRIVE_REFRESH_TOKEN,
+            rootFolderId: env.GOOGLE_DRIVE_ROOT_FOLDER_ID,
+          });
         }
 
         let primary: IStorageProvider;
         switch (env.STORAGE_PROVIDER) {
           case 'google_drive':
-            if (!drive) throw new Error('STORAGE_PROVIDER=google_drive needs GOOGLE_DRIVE_CREDENTIALS_JSON');
+            if (!drive) throw new Error('STORAGE_PROVIDER=google_drive requires GOOGLE_DRIVE_REFRESH_TOKEN or GOOGLE_DRIVE_CREDENTIALS_JSON');
             primary = drive;
             break;
           case 'local':
@@ -87,7 +96,7 @@ class CompositeStorageProvider implements IStorageProvider {
             break;
           case 'none':
           default:
-            primary = db.configured ? mongo : new NotConfiguredStorageProvider();
+            primary = drive ?? (db.configured ? mongo : new NotConfiguredStorageProvider());
             break;
         }
 

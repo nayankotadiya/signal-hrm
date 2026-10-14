@@ -1,23 +1,55 @@
 import { drive, drive_v3 } from '@googleapis/drive';
 import { createHash } from 'node:crypto';
 import { PassThrough, Readable } from 'node:stream';
-import { GoogleAuth } from 'google-auth-library';
+import { GoogleAuth, OAuth2Client } from 'google-auth-library';
 import type { IStorageProvider, PutFileInput, StorageHealth, StoredFileRef } from './storage-provider.interface';
 
+export interface GoogleDriveConfig {
+  credentialsJson?: string;
+  clientId?: string;
+  clientSecret?: string;
+  refreshToken?: string;
+  rootFolderId?: string;
+}
+
 /**
- * Google Drive through a service account (credentials only on the server). Files are private to the
- * service account / shared drive; the API streams them after a permission check, so no Drive link is
- * ever exposed to users. Folder per organization/purpose is created on demand under ROOT_FOLDER_ID.
+ * Google Drive Storage Provider:
+ * Supports:
+ * 1. Personal Google Drive (15 GB Free): Using OAuth2 refresh token (client_id, client_secret, refresh_token).
+ * 2. Google Workspace Shared Drive: Using a Service Account (credentials JSON) added to the Shared Drive.
  */
 export class GoogleDriveStorageProvider implements IStorageProvider {
   readonly name = 'google_drive';
   private readonly client: drive_v3.Drive;
+  private readonly rootFolderId?: string;
   private folderCache = new Map<string, string>();
 
-  constructor(credentialsJson: string, private readonly rootFolderId?: string) {
-    const credentials = JSON.parse(credentialsJson);
-    const auth = new GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/drive'] });
-    this.client = drive({ version: 'v3', auth });
+  constructor(configOrJson: string | GoogleDriveConfig, rootFolderId?: string) {
+    let cfg: GoogleDriveConfig;
+    if (typeof configOrJson === 'string') {
+      cfg = { credentialsJson: configOrJson, rootFolderId };
+    } else {
+      cfg = configOrJson;
+    }
+    this.rootFolderId = cfg.rootFolderId;
+
+    if (cfg.refreshToken && cfg.clientId) {
+      const oauth2 = new OAuth2Client(cfg.clientId, cfg.clientSecret);
+      oauth2.setCredentials({ refresh_token: cfg.refreshToken });
+      this.client = drive({ version: 'v3', auth: oauth2 });
+    } else if (cfg.credentialsJson) {
+      const parsed = JSON.parse(cfg.credentialsJson);
+      if (parsed.refresh_token || parsed.type === 'authorized_user') {
+        const oauth2 = new OAuth2Client(parsed.client_id, parsed.client_secret);
+        oauth2.setCredentials({ refresh_token: parsed.refresh_token });
+        this.client = drive({ version: 'v3', auth: oauth2 });
+      } else {
+        const auth = new GoogleAuth({ credentials: parsed, scopes: ['https://www.googleapis.com/auth/drive'] });
+        this.client = drive({ version: 'v3', auth });
+      }
+    } else {
+      throw new Error('GoogleDriveStorageProvider requires credentialsJson or refreshToken + clientId');
+    }
   }
 
   private async folder(name: string, parent?: string): Promise<string> {
@@ -42,13 +74,22 @@ export class GoogleDriveStorageProvider implements IStorageProvider {
     });
     const org = await this.folder(input.organizationId, this.rootFolderId);
     const parent = await this.folder(input.folder.replace(/[^\w-]/g, '_') || 'files', org);
-    const res = await this.client.files.create({
-      requestBody: { name: input.fileName.slice(0, 200), parents: [parent] },
-      media: { mimeType: input.mimeType, body: Readable.from(buf) },
-      fields: 'id,size,md5Checksum',
-      supportsAllDrives: true,
-    });
-    return { provider: this.name, providerFileId: res.data.id!, mimeType: input.mimeType, sizeBytes: buf.length, checksum: createHash('sha256').update(buf).digest('hex') };
+    try {
+      const res = await this.client.files.create({
+        requestBody: { name: input.fileName.slice(0, 200), parents: [parent] },
+        media: { mimeType: input.mimeType, body: Readable.from(buf) },
+        fields: 'id,size,md5Checksum',
+        supportsAllDrives: true,
+      });
+      return { provider: this.name, providerFileId: res.data.id!, mimeType: input.mimeType, sizeBytes: buf.length, checksum: createHash('sha256').update(buf).digest('hex') };
+    } catch (err: any) {
+      if (err?.message?.includes('storageQuotaExceeded') || err?.message?.includes('storage quota')) {
+        throw new Error(
+          'Google Drive quota exceeded: Service accounts cannot own files in personal Google Drive. Use a Google Workspace Shared Drive or configure GOOGLE_DRIVE_REFRESH_TOKEN for personal Drive.'
+        );
+      }
+      throw err;
+    }
   }
 
   async get(ref: StoredFileRef): Promise<Readable> {
@@ -74,11 +115,11 @@ export class GoogleDriveStorageProvider implements IStorageProvider {
   async healthCheck(): Promise<StorageHealth> {
     const start = Date.now();
     try {
-      await this.client.about.get({ fields: 'user' });
+      await this.client.about.get({ fields: 'user,storageQuota' });
       const latencyMs = Date.now() - start;
-      return latencyMs > 1500 ? { state: 'degraded', reason: 'slow_response', latencyMs } : { state: 'healthy', reason: 'ok', latencyMs };
-    } catch {
-      return { state: 'unavailable', reason: 'check_failed', latencyMs: Date.now() - start };
+      return latencyMs > 2000 ? { state: 'degraded', reason: 'slow_response', latencyMs } : { state: 'healthy', reason: 'ok', latencyMs };
+    } catch (err: any) {
+      return { state: 'unavailable', reason: err?.message?.slice(0, 80) || 'check_failed', latencyMs: Date.now() - start };
     }
   }
 

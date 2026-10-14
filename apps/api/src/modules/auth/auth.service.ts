@@ -131,7 +131,7 @@ export class AuthService {
       });
     } catch (e: any) {
       this.logger.error(`Failed to send OTP email to ${maskIdentifier(value)}: ${e?.message ?? e}`);
-      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'EMAIL_DELIVERY_FAILED', 'Failed to deliver verification code email. Please try again or use your password.');
+      throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, 'EMAIL_DELIVERY_FAILED', `Failed to deliver verification code email (${e?.message ?? 'SMTP error'}). Please try again or use your password.`);
     }
     if (this.env.OTP_DEV_ECHO && this.env.APP_ENV === 'development') this.logger.warn(`[dev] OTP for ${value}: ${code}`);
     return generic;

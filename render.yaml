@@ -65,6 +65,12 @@ services:
         sync: false
       - key: GOOGLE_DRIVE_ROOT_FOLDER_ID
         sync: false
+      - key: GOOGLE_DRIVE_REFRESH_TOKEN
+        sync: false
+      - key: GOOGLE_DRIVE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_DRIVE_CLIENT_SECRET
+        sync: false
       - key: MONGODB_STORAGE_LIMIT_MB
         value: "512"
       - key: BACKUP_ENABLED

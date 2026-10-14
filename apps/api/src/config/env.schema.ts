@@ -41,6 +41,10 @@ export const envSchema = z
     LOCAL_STORAGE_DIR: z.string().default('./var/storage'),
     GOOGLE_DRIVE_CREDENTIALS_JSON: optionalString, // service-account JSON (server only)
     GOOGLE_DRIVE_ROOT_FOLDER_ID: optionalString,
+    GOOGLE_DRIVE_REFRESH_TOKEN: optionalString,
+    GOOGLE_DRIVE_CLIENT_ID: optionalString,
+    GOOGLE_DRIVE_CLIENT_SECRET: optionalString,
+    GOOGLE_CLIENT_SECRET: optionalString,
     MAX_UPLOAD_MB: z.coerce.number().int().positive().default(15),
 
     // Auth and sessions
