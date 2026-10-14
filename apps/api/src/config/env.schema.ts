@@ -36,8 +36,8 @@ export const envSchema = z
     REDIS_URL: optionalString,
     RATE_LIMIT_TTL_MS: z.coerce.number().int().positive().default(60_000),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
-    // Files: none | local (disk, dev and small installs) | google_drive (service account)
-    STORAGE_PROVIDER: z.enum(['none', 'local', 'google_drive']).default('none'),
+    // Files: none | local (disk, dev and small installs) | google_drive (service account) | mongodb (Atlas GridFS)
+    STORAGE_PROVIDER: z.enum(['none', 'local', 'google_drive', 'mongodb']).default('none'),
     LOCAL_STORAGE_DIR: z.string().default('./var/storage'),
     GOOGLE_DRIVE_CREDENTIALS_JSON: optionalString, // service-account JSON (server only)
     GOOGLE_DRIVE_ROOT_FOLDER_ID: optionalString,

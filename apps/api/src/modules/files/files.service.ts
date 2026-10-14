@@ -103,7 +103,7 @@ export class FilesService {
     });
     try {
       const ref = await this.storage.put({ organizationId: ctx.user.orgId, folder: input.purpose, fileName: name, mimeType: declared, body: input.buffer, sizeBytes: input.buffer.length });
-      await this.files.updateOne({ _id: rec._id }, { $set: { status: 'stored', providerFileId: ref.providerFileId, checksum: ref.checksum } });
+      await this.files.updateOne({ _id: rec._id }, { $set: { status: 'stored', provider: ref.provider, providerFileId: ref.providerFileId, checksum: ref.checksum } });
       await this.versions.create({ organizationId: ctx.orgOid, fileId: rec._id, version: 1, providerFileId: ref.providerFileId, sizeBytes: ref.sizeBytes, checksum: ref.checksum, uploadedBy: ctx.userOid });
     } catch (e) {
       // Recorded as a failed upload (visible in Storage > Failed uploads) and reported to the user.
@@ -118,7 +118,7 @@ export class FilesService {
   /** Stores a server-generated file (payslip PDF, export) without a user upload. */
   async storeGenerated(orgId: Types.ObjectId, input: { buffer: Buffer; name: string; mimeType: string; purpose: FilePurpose; ownerEmployeeId?: Types.ObjectId; linked?: { type: string; id: Types.ObjectId }; uploadedBy?: Types.ObjectId; deleteAfter?: Date }): Promise<any> {
     const ref = await this.storage.put({ organizationId: String(orgId), folder: input.purpose, fileName: input.name, mimeType: input.mimeType, body: input.buffer, sizeBytes: input.buffer.length });
-    const rec = await this.files.create({ organizationId: orgId, name: input.name, purpose: input.purpose, provider: this.storage.name, providerFileId: ref.providerFileId, mimeType: input.mimeType, sizeBytes: ref.sizeBytes, checksum: ref.checksum, uploadedBy: input.uploadedBy, ownerEmployeeId: input.ownerEmployeeId, linked: input.linked, status: 'stored', deleteAfter: input.deleteAfter });
+    const rec = await this.files.create({ organizationId: orgId, name: input.name, purpose: input.purpose, provider: ref.provider, providerFileId: ref.providerFileId, mimeType: input.mimeType, sizeBytes: ref.sizeBytes, checksum: ref.checksum, uploadedBy: input.uploadedBy, ownerEmployeeId: input.ownerEmployeeId, linked: input.linked, status: 'stored', deleteAfter: input.deleteAfter });
     return rec.toObject();
   }
 
