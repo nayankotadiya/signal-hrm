@@ -625,40 +625,33 @@ class _LoginPageState extends State<LoginPage> {
                 ),
               ),
             ],
+            const SizedBox(height: 16),
+            Text('Enter 6-digit Code', style: t.text.title(size: 15)),
+            const SizedBox(height: 8),
+            NTextField(
+              label: '6-digit OTP code',
+              controller: _code,
+              keyboardType: TextInputType.number,
+              prefixIcon: Icons.pin_rounded,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
+              autofillHints: const [AutofillHints.oneTimeCode],
+              autofocus: true,
+              onSubmitted: (_) => _verifyOtp(),
+              onChanged: (v) {
+                if (v.trim().length == 6 && !_busy) _verifyOtp();
+              },
+            ),
+            const SizedBox(height: 10),
+            Align(alignment: Alignment.centerLeft, child: _buildKeepSignedInRow(t)),
+            const SizedBox(height: 14),
+            NButton(
+              label: 'Verify Code & Sign In',
+              icon: Icons.login_rounded,
+              variant: NButtonVariant.accent,
+              busy: _busy,
+              onPressed: _verifyOtp,
+            ),
           ],
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Text('Enter 6-digit Code', style: t.text.title(size: 15)),
-              const Spacer(),
-              if (!_codeSent)
-                Text('Enter if already received', style: t.text.caption(color: t.muted)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          NTextField(
-            label: '6-digit OTP code',
-            controller: _code,
-            keyboardType: TextInputType.number,
-            prefixIcon: Icons.pin_rounded,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
-            autofillHints: const [AutofillHints.oneTimeCode],
-            autofocus: _codeSent,
-            onSubmitted: (_) => _verifyOtp(),
-            onChanged: (v) {
-              if (v.trim().length == 6 && !_busy) _verifyOtp();
-            },
-          ),
-          const SizedBox(height: 10),
-          Align(alignment: Alignment.centerLeft, child: _buildKeepSignedInRow(t)),
-          const SizedBox(height: 14),
-          NButton(
-            label: 'Verify Code & Sign In',
-            icon: Icons.login_rounded,
-            variant: NButtonVariant.accent,
-            busy: _busy,
-            onPressed: _verifyOtp,
-          ),
         ],
 
         // Single Sign-On (Google / Apple)

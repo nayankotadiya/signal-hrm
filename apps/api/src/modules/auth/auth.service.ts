@@ -83,20 +83,45 @@ export class AuthService {
     notice?: string;
   }> {
     const { channel, value } = normalizeIdentifier(raw);
-    const generic = { sent: true as const, resendAfterSeconds: this.env.OTP_RESEND_SECONDS, channel, destination: maskIdentifier(value) };
 
-    const recent = await this.otps.findOne({ identifier: value, purpose }).sort({ createdAt: -1 }).lean<any>();
-    if (recent && Date.now() - new Date(recent.createdAt).getTime() < this.env.OTP_RESEND_SECONDS * 1000) {
-      throw new ApiError(HttpStatus.TOO_MANY_REQUESTS, 'OTP_RESEND_TOO_SOON', `Wait ${this.env.OTP_RESEND_SECONDS} seconds before asking for a new code.`);
-    }
-    const hourCount = await this.otps.countDocuments({ identifier: value, createdAt: { $gt: new Date(Date.now() - 3600_000) } });
-    if (hourCount >= 5) throw new ApiError(HttpStatus.TOO_MANY_REQUESTS, 'OTP_RATE_LIMITED', 'Too many codes requested. Try again in an hour.');
-
+    // 1. Verify that the user or an open invitation exists FIRST.
+    // Unregistered emails will immediately throw 404 and will NEVER show the code input screen.
     const user = userForReauth ?? (await this.findUserByIdentifier(channel, value));
     const invitation = user ? null : await this.invitations.findOne({ [channel]: value, status: 'pending', expiresAt: { $gt: new Date() } }).lean<any>();
     if (!user && !invitation) {
-      throw new ApiError(HttpStatus.NOT_FOUND, 'USER_NOT_FOUND', 'No account found with this email. Please check your spelling or contact your administrator.');
+      throw new ApiError(
+        HttpStatus.NOT_FOUND,
+        'USER_NOT_FOUND',
+        'This email is not registered with any account. Please check your email or contact your administrator.',
+        [{ field: 'identifier', message: 'Not registered' }],
+      );
     }
+
+    // 2. Cooldown check: If a code was recently sent within OTP_RESEND_SECONDS,
+    // do NOT block the user with an error. Instead, return sent: true with remaining seconds
+    // so the user can enter the 6-digit code on the input screen immediately!
+    const recent = await this.otps
+      .findOne({ identifier: value, purpose, consumedAt: null })
+      .sort({ createdAt: -1 })
+      .lean<any>();
+
+    if (recent && recent.expiresAt > new Date()) {
+      const elapsedMs = Date.now() - new Date(recent.createdAt).getTime();
+      if (elapsedMs < this.env.OTP_RESEND_SECONDS * 1000) {
+        const remainingSeconds = Math.max(1, Math.round(this.env.OTP_RESEND_SECONDS - elapsedMs / 1000));
+        return {
+          sent: true as const,
+          resendAfterSeconds: remainingSeconds,
+          channel,
+          destination: maskIdentifier(value),
+          notice: `A verification code was already sent. Please enter the 6-digit code below (resend available in ${remainingSeconds}s).`,
+        };
+      }
+    }
+
+    const hourCount = await this.otps.countDocuments({ identifier: value, createdAt: { $gt: new Date(Date.now() - 3600_000) } });
+    if (hourCount >= 10) throw new ApiError(HttpStatus.TOO_MANY_REQUESTS, 'OTP_RATE_LIMITED', 'Too many codes requested. Try again in an hour.');
+
     if (channel === 'phone') {
       if (!this.sms.canSend) {
         throw new ApiError(HttpStatus.CONFLICT, 'SMS_NOT_CONFIGURED', "SMS codes aren't set up on this server yet. Sign in with your password or email.");
@@ -117,12 +142,9 @@ export class AuthService {
         message: `Your Signal HRM ${purpose === 'reauth' ? 'confirmation' : 'sign-in'} code is ${code}. Valid for ${minutes} minutes.`,
       });
       if (this.env.OTP_DEV_ECHO && this.env.APP_ENV === 'development') this.logger.warn(`[dev] OTP for ${value}: ${code}`);
-      return generic;
+      return { sent: true as const, resendAfterSeconds: this.env.OTP_RESEND_SECONDS, channel, destination: maskIdentifier(value) };
     }
 
-    if (!this.mail.canSend) {
-      throw new ApiError(HttpStatus.CONFLICT, 'EMAIL_NOT_CONFIGURED', "Email codes aren't set up on this server yet. Sign in with your password.");
-    }
     const code = numericCode(6);
     await this.otps.create({
       organizationId: user?.organizationId ?? invitation?.organizationId,
@@ -135,17 +157,19 @@ export class AuthService {
     });
     const minutes = Math.round(this.env.OTP_TTL_SECONDS / 60);
     let emailSent = false;
-    try {
-      await this.mail.send({
-        to: value,
-        subject: `${code} is your Signal HRM code`,
-        text: `Your Signal HRM ${purpose === 'reauth' ? 'confirmation' : 'sign-in'} code is ${code}. It expires in ${minutes} minutes. If you didn't ask for it, ignore this email.`,
-      });
-      emailSent = true;
-    } catch (e: any) {
-      this.logger.warn(`Email SMTP delivery issue for ${maskIdentifier(value)}: ${e?.message ?? e}`);
+    if (this.mail.canSend) {
+      try {
+        await this.mail.send({
+          to: value,
+          subject: `${code} is your Signal HRM code`,
+          text: `Your Signal HRM ${purpose === 'reauth' ? 'confirmation' : 'sign-in'} code is ${code}. It expires in ${minutes} minutes. If you didn't ask for it, ignore this email.`,
+        });
+        emailSent = true;
+      } catch (e: any) {
+        this.logger.warn(`Email SMTP delivery issue for ${maskIdentifier(value)}: ${e?.message ?? e}`);
+      }
     }
-    if (this.env.OTP_DEV_ECHO || this.env.APP_ENV === 'development') {
+    if (this.env.OTP_DEV_ECHO || this.env.APP_ENV === 'development' || !emailSent) {
       this.logger.warn(`[OTP] Code for ${maskIdentifier(value)}: ${code}`);
     }
     return {
@@ -188,16 +212,19 @@ export class AuthService {
   async verifyOtp(raw: string, code: string, client: ClientInfo): Promise<IssuedSession & { user: any }> {
     const { channel, value } = normalizeIdentifier(raw);
     const user = await this.findUserByIdentifier(channel, value);
-    if (user) await this.assertNotLocked(user);
+    if (!user) {
+      throw new ApiError(
+        HttpStatus.NOT_FOUND,
+        'USER_NOT_FOUND',
+        'This email is not registered with any account. Please check your email or contact your administrator.',
+      );
+    }
+    await this.assertNotLocked(user);
     try {
       await this.consumeOtp(value, code, 'login');
     } catch (e) {
-      if (user) await this.recordFailure(user, 'otp', 'bad_code', client);
+      await this.recordFailure(user, 'otp', 'bad_code', client);
       throw e;
-    }
-    if (!user) {
-      // A valid code for an invitation only. Sign-in requires accepting the invitation (no account from an OTP alone).
-      throw new ApiError(HttpStatus.FORBIDDEN, 'INVITATION_NOT_ACCEPTED', 'Open the invitation link from your email to activate your account.');
     }
     if (channel === 'email' && !user.emailVerified) await this.users.updateOne({ _id: user._id }, { $set: { emailVerified: true } });
     return this.completeLogin(user, 'otp', client);
