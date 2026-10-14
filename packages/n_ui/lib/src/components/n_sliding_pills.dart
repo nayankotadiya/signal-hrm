@@ -304,7 +304,10 @@ class _NSlidingPillsState extends State<NSlidingPills> with SingleTickerProvider
   }
 
   void _handleTap(int index) {
-    if (index == widget.selectedIndex) return;
+    if (index == widget.selectedIndex) {
+      widget.onChanged(index);
+      return;
+    }
     if (widget.pageController != null) {
       _tapDriven = true;
       _tapDrivenTimer?.cancel();

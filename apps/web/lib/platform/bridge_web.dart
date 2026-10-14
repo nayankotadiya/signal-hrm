@@ -53,6 +53,12 @@ extension type _AppleAuthorization._(JSObject _) implements JSObject {
 @JS('SignalPush.subscribe')
 external JSPromise<JSObject?> _signalPushSubscribe(JSString apiBaseUrl, JSString token);
 
+@JS('SignalPush.isSubscribed')
+external JSPromise<JSBoolean> _signalPushIsSubscribed();
+
+@JS('SignalPush.unsubscribe')
+external JSPromise<JSObject?> _signalPushUnsubscribe(JSString apiBaseUrl, JSString token);
+
 class WebBridge implements PlatformBridge {
   WebBridge() {
     web.window.addEventListener('online', ((web.Event _) => _online.add(true)).toJS);
@@ -235,6 +241,28 @@ class WebBridge implements PlatformBridge {
   Future<bool> subscribePushNotifications(String apiBaseUrl, String? token) async {
     try {
       final promise = _signalPushSubscribe(apiBaseUrl.toJS, (token ?? '').toJS);
+      final res = await promise.toDart;
+      return res != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> isPushSubscribed() async {
+    try {
+      final promise = _signalPushIsSubscribed();
+      final res = await promise.toDart;
+      return res.toDart;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> unsubscribePushNotifications(String apiBaseUrl, String? token) async {
+    try {
+      final promise = _signalPushUnsubscribe(apiBaseUrl.toJS, (token ?? '').toJS);
       final res = await promise.toDart;
       return res != null;
     } catch (_) {

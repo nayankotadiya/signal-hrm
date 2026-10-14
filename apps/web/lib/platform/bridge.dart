@@ -59,6 +59,12 @@ abstract class PlatformBridge {
   /// Subscribes the current device/browser to Web Push notifications for 24/7 background alerts.
   Future<bool> subscribePushNotifications(String apiBaseUrl, String? token);
 
+  /// Checks if Web Push is currently active on this device.
+  Future<bool> isPushSubscribed();
+
+  /// Unsubscribes the current device/browser from Web Push notifications.
+  Future<bool> unsubscribePushNotifications(String apiBaseUrl, String? token);
+
   /// Opens an external URL in a new tab or browser window.
   void openUrl(String url);
 }

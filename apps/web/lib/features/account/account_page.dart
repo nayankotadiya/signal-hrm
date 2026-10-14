@@ -26,6 +26,12 @@ class AccountPage extends StatelessWidget {
     return PageFrame(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            tooltip: 'Back to Home',
+            onPressed: () => context.go('/'),
+          ),
+          const SizedBox(width: 8),
           NAvatar(name: me.name, size: 64),
           const SizedBox(width: 16),
           Expanded(
@@ -148,45 +154,7 @@ class _NotificationPrefsState extends State<_NotificationPrefs> {
           }
 
           return Column(children: [
-            Container(
-              margin: const EdgeInsets.only(bottom: 16),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: t.card,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: t.cardBorder),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.notifications_active_rounded, color: t.primaryButton),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('24/7 Background Push Alerts', style: t.text.body(weight: FontWeight.w600)),
-                        Text('Receive instant alerts even when the browser or app is closed.', style: t.text.caption()),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  NButton(
-                    label: 'Enable',
-                    variant: NButtonVariant.secondary,
-                    onPressed: () async {
-                      final ok = await bridge.subscribePushNotifications(context.api.baseUrl, context.api.token);
-                      if (context.mounted) {
-                        if (ok) {
-                          NToast.of(context).show('24/7 background push notifications active on this device!');
-                        } else {
-                          NToast.of(context).show('Push notifications could not be enabled. Please check browser permissions.');
-                        }
-                      }
-                    },
-                  ),
-                ],
-              ),
-            ),
+            const _PushAlertsRow(),
             Row(children: [
               const Expanded(child: SizedBox()),
               SizedBox(width: 56, child: Text('In app', textAlign: TextAlign.center, style: t.text.caption())),
@@ -209,6 +177,178 @@ class _NotificationPrefsState extends State<_NotificationPrefs> {
               ]),
           ]);
         },
+      ),
+    );
+  }
+}
+
+class _PushAlertsRow extends StatefulWidget {
+  const _PushAlertsRow();
+
+  @override
+  State<_PushAlertsRow> createState() => _PushAlertsRowState();
+}
+
+class _PushAlertsRowState extends State<_PushAlertsRow> {
+  bool _active = false;
+  bool _loading = true;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkStatus();
+  }
+
+  Future<void> _checkStatus() async {
+    try {
+      final subbed = await bridge.isPushSubscribed();
+      if (mounted) {
+        setState(() {
+          _active = subbed;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _toggle() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      if (_active) {
+        final ok = await bridge.unsubscribePushNotifications(context.api.baseUrl, context.api.token);
+        if (mounted) {
+          setState(() {
+            _active = !ok;
+            _busy = false;
+          });
+          if (ok) {
+            NToast.of(context).show('24/7 background push notifications disabled.');
+          } else {
+            NToast.of(context).show('Could not disable notifications.');
+          }
+        }
+      } else {
+        final ok = await bridge.subscribePushNotifications(context.api.baseUrl, context.api.token);
+        if (mounted) {
+          setState(() {
+            _active = ok;
+            _busy = false;
+          });
+          if (ok) {
+            NToast.of(context).show('24/7 background push notifications active on this device!');
+          } else {
+            NToast.of(context).show('Push notifications could not be enabled. Please check browser permissions.');
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _busy = false);
+        NToast.of(context).show('Operation failed. Please check permissions.');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NTokens.of(context);
+    final isDark = t.isDark;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: _active ? t.accent.withValues(alpha: isDark ? 0.12 : 0.06) : t.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _active ? t.accent.withValues(alpha: isDark ? 0.4 : 0.3) : t.cardBorder,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: (_active ? t.accent : t.muted).withValues(alpha: 0.14),
+            ),
+            child: Icon(
+              _active ? Icons.notifications_active_rounded : Icons.notifications_off_outlined,
+              color: _active ? t.accent : t.muted,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        '24/7 Background Push Alerts',
+                        style: t.text.body(weight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: (_active ? t.accent : t.muted).withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _active ? (isDark ? const Color(0xFF34D399) : const Color(0xFF059669)) : t.muted,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _active ? 'Active' : 'Disabled',
+                            style: t.text.caption(weight: FontWeight.w600).copyWith(
+                                  fontSize: 10.5,
+                                  color: _active ? (isDark ? const Color(0xFF34D399) : const Color(0xFF059669)) : t.muted,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _active
+                      ? 'Instant alerts enabled. You receive updates even when closed.'
+                      : 'Receive instant alerts even when the browser or app is closed.',
+                  style: t.text.caption(),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (_loading)
+            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+          else
+            NButton(
+              label: _active ? 'Disable' : 'Enable',
+              variant: _active ? NButtonVariant.secondary : NButtonVariant.accent,
+              busy: _busy,
+              compact: true,
+              onPressed: _toggle,
+            ),
+        ],
       ),
     );
   }

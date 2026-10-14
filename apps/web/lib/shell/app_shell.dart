@@ -59,7 +59,14 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  void _go(int index) => widget.navigationShell.goBranch(index, initialLocation: index == widget.navigationShell.currentIndex);
+  void _go(int index) {
+    final d = widget.destinations[index];
+    if (index == widget.navigationShell.currentIndex) {
+      context.go(d.path);
+    } else {
+      widget.navigationShell.goBranch(index, initialLocation: true);
+    }
+  }
 
   void _palette() => showCommandPalette(context, widget.destinations, _go);
 
@@ -223,25 +230,29 @@ class _TopBar extends StatelessWidget {
       ),
     ]);
 
-    final wordmark = Semantics(
-      header: true,
-      label: '${l.appTitle}. ${me?.orgName ?? l.tagline}',
-      excludeSemantics: true,
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        const SignalMark(size: 34, animated: false),
-        const SizedBox(width: 10),
-        if (!bp.isMobile || NBreakpoint.widthOf(context) > 380)
-          Flexible(
-            child: Text.rich(
-              TextSpan(children: [
-                TextSpan(text: 'Signal ', style: t.text.title(size: 18).copyWith(fontWeight: FontWeight.w300)),
-                TextSpan(text: 'HRM', style: t.text.title(size: 18).copyWith(fontWeight: FontWeight.w600)),
-              ]),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+    final wordmark = InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => context.go('/'),
+      child: Semantics(
+        header: true,
+        label: '${l.appTitle}. ${me?.orgName ?? l.tagline}',
+        excludeSemantics: true,
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const SignalMark(size: 34, animated: false),
+          const SizedBox(width: 10),
+          if (!bp.isMobile || NBreakpoint.widthOf(context) > 380)
+            Flexible(
+              child: Text.rich(
+                TextSpan(children: [
+                  TextSpan(text: 'Signal ', style: t.text.title(size: 18).copyWith(fontWeight: FontWeight.w300)),
+                  TextSpan(text: 'HRM', style: t.text.title(size: 18).copyWith(fontWeight: FontWeight.w600)),
+                ]),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
-      ]),
+        ]),
+      ),
     );
 
     return Padding(

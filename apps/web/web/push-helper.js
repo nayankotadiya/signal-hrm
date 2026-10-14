@@ -73,6 +73,46 @@
         console.warn('[SignalPush] Subscribe error:', e);
         return { ok: false, reason: e.message };
       }
+    },
+    isSubscribed: async function () {
+      if (!this.isSupported()) return false;
+      if (Notification.permission !== 'granted') return false;
+      try {
+        var reg = await navigator.serviceWorker.ready;
+        if (!reg) return false;
+        var sub = await reg.pushManager.getSubscription();
+        return !!sub;
+      } catch (e) {
+        return false;
+      }
+    },
+    unsubscribe: async function (apiBaseUrl, token) {
+      if (!this.isSupported()) return { ok: false };
+      try {
+        var reg = await navigator.serviceWorker.ready;
+        if (!reg) return { ok: false };
+        var sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          var endpoint = sub.endpoint;
+          await sub.unsubscribe();
+          if (apiBaseUrl && token) {
+            try {
+              await fetch(apiBaseUrl + '/v1/notifications/push/unsubscribe', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer ' + token
+                },
+                body: JSON.stringify({ endpoint: endpoint })
+              });
+            } catch (_) {}
+          }
+        }
+        return { ok: true };
+      } catch (e) {
+        console.warn('[SignalPush] Unsubscribe error:', e);
+        return { ok: false, reason: e.message };
+      }
     }
   };
 

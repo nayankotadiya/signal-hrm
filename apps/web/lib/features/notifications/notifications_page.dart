@@ -36,11 +36,23 @@ class _NotificationsPageState extends State<NotificationsPage> {
     final t = NTokens.of(context);
     return PageFrame(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        NSectionHeader(
-          title: 'Notifications',
-          trailing: [
-            NFilterChips<bool>(value: _unreadOnly, onChanged: (v) => setState(() => _unreadOnly = v), options: const [NOption(false, 'All'), NOption(true, 'Unread')]),
-            NButton(label: 'Mark all read', icon: Icons.done_all_rounded, compact: true, variant: NButtonVariant.secondary, onPressed: _markAll),
+        Row(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.arrow_back_rounded),
+              tooltip: 'Back to Home',
+              onPressed: () => context.go('/'),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: NSectionHeader(
+                title: 'Notifications',
+                trailing: [
+                  NFilterChips<bool>(value: _unreadOnly, onChanged: (v) => setState(() => _unreadOnly = v), options: const [NOption(false, 'All'), NOption(true, 'Unread')]),
+                  NButton(label: 'Mark all read', icon: Icons.done_all_rounded, compact: true, variant: NButtonVariant.secondary, onPressed: _markAll),
+                ],
+              ),
+            ),
           ],
         ),
         PagedList(

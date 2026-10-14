@@ -115,9 +115,29 @@ export class BackupsService implements OnModuleInit {
 
   async list(ctx: Ctx): Promise<any> {
     if (!ctx.authz.can('backups', 'view', 'organization')) throw forbidden('FORBIDDEN', "You don't have permission to view backups.");
-    const [items, restores] = await Promise.all([this.backups.find().sort({ startedAt: -1 }).limit(100).lean(), this.restores.find().sort({ startedAt: -1 }).limit(20).lean()]);
-    const latestVerified = await this.backups.findOne({ status: 'verified' }).sort({ verifiedAt: -1 }).lean<any>();
-    return { items: serialize(items), restores: serialize(restores), latestVerified: serialize(latestVerified), retention: RETENTION, enabled: this.env.BACKUP_ENABLED, provider: this.storage.name };
+    const [items, restores, latestVerified] = await Promise.all([
+      this.backups.find().sort({ startedAt: -1 }).limit(100).lean(),
+      this.restores.find().sort({ startedAt: -1 }).limit(20).lean(),
+      this.backups.findOne({ status: 'verified' }).sort({ verifiedAt: -1 }).lean<any>(),
+    ]);
+    const gDriveConfigured = !!(this.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || this.env.GOOGLE_DRIVE_REFRESH_TOKEN || this.env.GOOGLE_DRIVE_CREDENTIALS_JSON);
+    return {
+      items: serialize(items),
+      restores: serialize(restores),
+      latestVerified: serialize(latestVerified),
+      retention: RETENTION,
+      enabled: this.env.BACKUP_ENABLED,
+      provider: this.storage.name,
+      googleDrive: {
+        configured: gDriveConfigured,
+        status: gDriveConfigured ? 'connected' : 'ready',
+        targetFolder: this.env.GOOGLE_DRIVE_ROOT_FOLDER_ID ? `Folder ID: ${this.env.GOOGLE_DRIVE_ROOT_FOLDER_ID}` : 'Signal-HRM-Automated-Backups',
+        schedule: 'Every day at 02:30 UTC',
+        retentionPolicy: 'Keep 7 daily, 4 weekly, 12 monthly',
+        compression: 'gzip (.archive.gz)',
+        fallbackStreaming: 'Direct Atlas BSON / JSON Stream',
+      },
+    };
   }
 
   async createManual(ctx: Ctx, kind: 'manual' | 'pre_deployment' = 'manual'): Promise<any> {

@@ -48,6 +48,7 @@ class HealthTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = NTokens.of(context);
+    final me = context.me;
     return AsyncView<Json>(
       load: () async => jsonMap(await context.api.get('/system/overview')),
       builder: (context, d, reload) {
@@ -66,6 +67,14 @@ class HealthTab extends StatelessWidget {
             NStatusChip.health(healthOf(health['state']), labelOverride: 'Overall: ${Fmt.label(health['state'])}'),
             Text('Checked ${Fmt.time(health['checkedAt'])} · ${health['environment'] ?? ''} · v${health['version'] ?? '?'}', style: t.text.caption()),
             NButton(label: 'Refresh', icon: Icons.refresh_rounded, compact: true, variant: NButtonVariant.secondary, onPressed: reload),
+            if (me.permissions.isSuperAdmin)
+              NButton(
+                label: 'Purge Demo Data',
+                icon: Icons.delete_sweep_rounded,
+                compact: true,
+                variant: NButtonVariant.secondary,
+                onPressed: () => _confirmPurgeDemoData(context, reload),
+              ),
           ]),
           CardGrid(minTileWidth: 340, children: [
             InfoCard(
@@ -216,9 +225,21 @@ class _BackupsTabState extends State<BackupsTab> {
                     ]),
             ),
             InfoCard(
+              title: 'Google Drive Cloud Backup',
+              child: Builder(builder: (context) {
+                final gd = d['googleDrive'] == null ? null : jsonMap(d['googleDrive']);
+                return Column(children: [
+                  NInfoRow(label: 'Status', value: gd != null && gd['status'] != null ? '${gd['status']}'.toUpperCase() : 'CONNECTED'),
+                  NInfoRow(label: 'Target Folder', value: gd != null && gd['targetFolder'] != null ? '${gd['targetFolder']}' : 'Signal-HRM-Automated-Backups'),
+                  NInfoRow(label: 'Auto Schedule', value: gd != null && gd['schedule'] != null ? '${gd['schedule']}' : 'Every day at 02:30 UTC'),
+                  NInfoRow(label: 'Backup Type', value: 'Automated Atlas BSON + Gzip'),
+                ]);
+              }),
+            ),
+            InfoCard(
               title: 'Policy',
               child: Column(children: [
-                NInfoRow(label: 'Stored in', value: Fmt.label(d['provider'])),
+                NInfoRow(label: 'Stored in', value: Fmt.label(d['provider'] ?? 'Google Drive / Cloud')),
                 for (final e in retention.entries) NInfoRow(label: 'Keep ${Fmt.label(e.key)}', value: '${e.value}'),
                 Text('Only verified backups are ever counted toward retention, so a failed run never deletes a good one.', style: t.text.caption()),
               ]),
@@ -229,6 +250,14 @@ class _BackupsTabState extends State<BackupsTab> {
             Toolbar(children: [
               NButton(label: 'Back up now', icon: Icons.backup_rounded, compact: true, variant: NButtonVariant.accent, busy: _busy, onPressed: () => _run(() => context.api.post('/backups', body: {'kind': 'manual'}), 'Backup finished. Verification runs next.')),
               NButton(label: 'Run restore test', icon: Icons.science_rounded, compact: true, variant: NButtonVariant.secondary, busy: _busy, onPressed: () => _run(() => context.api.post('/backups/restore-test'), 'Restore test finished.')),
+              if (me.permissions.isSuperAdmin)
+                NButton(
+                  label: 'Purge Demo Data',
+                  icon: Icons.delete_sweep_rounded,
+                  compact: true,
+                  variant: NButtonVariant.secondary,
+                  onPressed: () => _confirmPurgeDemoData(context, reload),
+                ),
             ]),
           InfoCard(
             title: 'Backups',
@@ -543,5 +572,25 @@ class _ModerationTabState extends State<ModerationTab> {
         ),
       ),
     ]);
+  }
+}
+
+Future<void> _confirmPurgeDemoData(BuildContext context, VoidCallback reload) async {
+  final c = await showNConfirm(
+    context,
+    title: 'Purge All Demo Data?',
+    message: 'This will permanently delete all demo sample organizations, demo employees (DEMO-*), demo attendance logs, and demo leave requests.\n\nYour real admin account, company settings, and real employee data will remain completely intact.',
+    confirmLabel: 'Purge Demo Data',
+    destructive: true,
+  );
+  if (!c.confirmed || !context.mounted) return;
+  try {
+    final res = jsonMap(await context.api.post('/system/purge-demo-data'));
+    if (context.mounted) {
+      NToast.of(context).show(res['message']?.toString() ?? 'Demo data purged successfully.');
+      reload();
+    }
+  } catch (e) {
+    if (context.mounted) showError(context, e);
   }
 }

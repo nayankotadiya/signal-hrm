@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:n_ui/n_ui.dart';
 
 import '../../app/preferences.dart';
@@ -219,11 +220,29 @@ class _AppearancePageState extends State<AppearancePage> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         NEntrance(
           order: 0,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            NGreeting(lead: l.appearanceLead, bold: l.appearanceBold),
-            const SizedBox(height: 6),
-            Text(l.appearanceSubtitle, style: t.text.body(color: t.muted)),
-          ]),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back_rounded),
+                tooltip: 'Back',
+                onPressed: () {
+                  if (context.canPop()) {
+                    context.pop();
+                  } else {
+                    context.go('/account');
+                  }
+                },
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  NGreeting(lead: l.appearanceLead, bold: l.appearanceBold),
+                  const SizedBox(height: 6),
+                  Text(l.appearanceSubtitle, style: t.text.body(color: t.muted)),
+                ]),
+              ),
+            ],
+          ),
         ),
         SizedBox(height: t.space(20)),
         if (bp.isWide || bp.isTablet)
