@@ -157,20 +157,33 @@ export class AuthService {
     });
     const minutes = Math.round(this.env.OTP_TTL_SECONDS / 60);
     let emailSent = false;
+    let emailError: string | null = null;
     if (this.mail.canSend) {
       try {
         await this.mail.send({
           to: value,
-          subject: `${code} is your Signal HRM code`,
+          subject: `${code} is your Signal HRM verification code`,
           text: `Your Signal HRM ${purpose === 'reauth' ? 'confirmation' : 'sign-in'} code is ${code}. It expires in ${minutes} minutes. If you didn't ask for it, ignore this email.`,
         });
         emailSent = true;
       } catch (e: any) {
-        this.logger.warn(`Email SMTP delivery issue for ${maskIdentifier(value)}: ${e?.message ?? e}`);
+        emailError = e?.message ?? String(e);
+        this.logger.warn(`Email delivery issue for ${maskIdentifier(value)}: ${emailError}`);
       }
     }
-    if (this.env.OTP_DEV_ECHO || this.env.APP_ENV === 'development' || !emailSent) {
-      this.logger.warn(`[OTP] Code for ${maskIdentifier(value)}: ${code}`);
+    if (this.env.OTP_DEV_ECHO && this.env.APP_ENV === 'development') {
+      this.logger.warn(`[dev] OTP for ${maskIdentifier(value)}: ${code}`);
+    }
+    if (!emailSent) {
+      if (this.env.APP_ENV !== 'development') {
+        throw new ApiError(
+          HttpStatus.BAD_GATEWAY,
+          'EMAIL_DELIVERY_FAILED',
+          emailError && emailError.length < 250
+            ? `Could not send verification email: ${emailError}`
+            : 'Could not deliver verification email. Please check your email configuration or contact your administrator.',
+        );
+      }
     }
     return {
       sent: true as const,
@@ -178,12 +191,6 @@ export class AuthService {
       channel,
       destination: maskIdentifier(value),
       emailDelivered: emailSent,
-      ...(emailSent
-        ? {}
-        : {
-            codePreview: code,
-            notice: 'Email delivery encountered a network timeout from the cloud host. Your 6-digit verification code has been auto-provided below.',
-          }),
     };
   }
 

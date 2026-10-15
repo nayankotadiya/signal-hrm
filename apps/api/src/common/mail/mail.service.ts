@@ -107,10 +107,17 @@ export class MailService {
           this.logger.log(`Resend email delivered to ${msg.to} (id: ${data.id || 'ok'})`);
           return;
         }
-        const errBody = await res.text().catch(() => '');
-        this.logger.error(`Resend API HTTP ${res.status} error for ${msg.to}: ${errBody}`);
+        const errJson: any = await res.json().catch(() => null);
+        const errMsg = errJson?.message || (await res.text().catch(() => ''));
+        this.logger.error(`Resend API HTTP ${res.status} error for ${msg.to}: ${errMsg}`);
+        if (!this.transport) {
+          throw new Error(errMsg || `Resend email delivery failed (HTTP ${res.status})`);
+        }
       } catch (resendErr: any) {
         this.logger.error(`Resend API network error: ${resendErr?.message || resendErr}`);
+        if (!this.transport) {
+          throw resendErr;
+        }
       }
     }
 

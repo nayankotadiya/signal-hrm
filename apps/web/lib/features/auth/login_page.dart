@@ -171,8 +171,6 @@ class _LoginPageState extends State<LoginPage> {
   // OTP state
   bool _codeSent = false;
   String? _destination;
-  String? _codePreview;
-  String? _deliveryNotice;
   int _resendIn = 0;
   Timer? _resendTimer;
 
@@ -260,12 +258,8 @@ class _LoginPageState extends State<LoginPage> {
         setState(() {
           _codeSent = true;
           _destination = sent.destination;
-          _codePreview = sent.codePreview;
-          _deliveryNotice = sent.notice;
           _resendIn = sent.resendAfterSeconds;
-          if (sent.codePreview != null && sent.codePreview!.isNotEmpty) {
-            _code.text = sent.codePreview!;
-          }
+          _code.clear();
         });
         _startResendTimer();
       }
@@ -563,33 +557,6 @@ class _LoginPageState extends State<LoginPage> {
                 ],
               ),
             ),
-            if (_codePreview != null) ...[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: t.accent.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: t.accent.withValues(alpha: 0.3)),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.verified_rounded, color: t.accent, size: 20),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Verification Code: $_codePreview', style: t.text.body(color: t.accent, weight: FontWeight.w700)),
-                          if (_deliveryNotice != null)
-                            Text(_deliveryNotice!, style: t.text.caption(color: t.muted)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
             const SizedBox(height: 16),
             Text('Enter 6-digit Code', style: t.text.title(size: 15)),
             const SizedBox(height: 8),

@@ -52,13 +52,9 @@ class OtpSent {
   const OtpSent({
     required this.destination,
     required this.resendAfterSeconds,
-    this.codePreview,
-    this.notice,
   });
   final String destination;
   final int resendAfterSeconds;
-  final String? codePreview;
-  final String? notice;
 }
 
 /// Owns sign-in state. The access token lives in [ApiClient] memory; a page reload restores the
@@ -123,8 +119,6 @@ class SessionController extends ChangeNotifier {
     return OtpSent(
       destination: '${j['destination'] ?? identifier}',
       resendAfterSeconds: (j['resendAfterSeconds'] as num?)?.toInt() ?? 60,
-      codePreview: j['codePreview'] as String?,
-      notice: j['notice'] as String?,
     );
   }
 
