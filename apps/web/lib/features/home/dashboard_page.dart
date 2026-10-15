@@ -222,7 +222,7 @@ class _SetupChecklistState extends State<_SetupChecklist> {
           subtitle: '$done of $total complete${remaining > 0 ? ' · $remaining required left' : ' · Optional steps'}',
           trailing: isMobile
               ? NButton(
-                  label: _expanded ? 'Hide' : 'View ($done/$total)',
+                  label: _expanded ? 'Hide' : 'View',
                   compact: true,
                   variant: NButtonVariant.secondary,
                   icon: _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,

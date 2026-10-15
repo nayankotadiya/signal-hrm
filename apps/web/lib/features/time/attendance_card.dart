@@ -1095,15 +1095,18 @@ class _SelfieSheetState extends State<_SelfieSheet> {
                         backgroundColor: t.green,
                         foregroundColor: Colors.white,
                         elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        padding: EdgeInsets.symmetric(horizontal: isMobile ? 10 : 16, vertical: 14),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(NTokens.radiusPill),
                         ),
                       ),
                       icon: const Icon(Icons.check_circle_rounded, size: 20, color: Colors.white),
-                      label: Text(
-                        '✓ Confirm & Continue',
-                        style: t.text.body(weight: FontWeight.w700, color: Colors.white),
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          isMobile ? '✓ Confirm' : '✓ Confirm & Continue',
+                          style: t.text.body(weight: FontWeight.w700, color: Colors.white),
+                        ),
                       ),
                       onPressed: () => Navigator.of(context).pop(_picked),
                     ),
