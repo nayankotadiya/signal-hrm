@@ -376,10 +376,10 @@ class PageFrame extends StatelessWidget {
     final mobile = bp.isMobile;
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(
-        mobile ? 10 : 22,
-        4,
-        mobile ? 10 : 22,
-        (mobile ? 104 : 22) + MediaQuery.paddingOf(context).bottom,
+        mobile ? 12 : 22,
+        mobile ? 14 : 16,
+        mobile ? 12 : 22,
+        (mobile ? 120 : 22) + MediaQuery.paddingOf(context).bottom,
       ),
       child: Center(
         child: ConstrainedBox(

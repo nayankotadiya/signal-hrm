@@ -111,28 +111,15 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
 
   Future<String?> _takeSelfie(bool checkIn, String? locationName, {String? stepTitle}) async {
     final api = context.api;
-    // Directly open device camera without showing intermediate review sheet
-    PickedFile? picked;
-    try {
-      picked = await bridge.pickFile(accept: 'image/*', capture: 'user');
-    } catch (_) {
-      picked = null;
-    }
-
-    // Fallback: If camera was cancelled or native picker was blocked, show sheet to retry
-    if (picked == null) {
-      if (!mounted) return null;
-      final retry = await showNSheet<PickedFile?>(
-        context,
-        title: stepTitle ?? (checkIn ? 'Check-in photo' : 'Check-out photo'),
-        subtitle: 'Camera was closed. Tap below to capture your attendance photo.',
-        builder: (ctx) => _SelfieSheet(isCheckIn: checkIn, locationName: locationName, stepTitle: stepTitle),
-      );
-      if (retry == null || !mounted) return null;
-      picked = retry;
-    }
-
     if (!mounted) return null;
+    final picked = await showNSheet<PickedFile?>(
+      context,
+      title: stepTitle ?? (checkIn ? 'Check-in photo' : 'Check-out photo'),
+      subtitle: 'Capture attendance photo to verify your punch.',
+      builder: (ctx) => _SelfieSheet(isCheckIn: checkIn, locationName: locationName, stepTitle: stepTitle),
+    );
+
+    if (picked == null || !mounted) return null;
     setState(() => _phase = _Phase.sending);
     final rec = await api.upload(picked, purpose: 'selfie');
     return rec['id'] as String?;
@@ -932,12 +919,6 @@ class _SelfieSheetState extends State<_SelfieSheet> {
   @override
   void initState() {
     super.initState();
-    // Directly open the camera on launch
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _picked == null) {
-        _takePhoto();
-      }
-    });
   }
 
   Future<void> _takePhoto() async {
@@ -945,8 +926,10 @@ class _SelfieSheetState extends State<_SelfieSheet> {
     try {
       final f = await bridge.pickFile(accept: 'image/*', capture: 'user');
       if (f != null && mounted) {
-        Navigator.of(context).pop(f);
+        setState(() => _picked = f);
       }
+    } catch (_) {
+      // Ignored
     } finally {
       if (mounted) setState(() => _busy = false);
     }

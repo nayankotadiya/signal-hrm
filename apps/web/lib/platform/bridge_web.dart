@@ -136,12 +136,36 @@ class WebBridge implements PlatformBridge {
       ..type = 'file'
       ..accept = accept;
     if (capture != null) input.setAttribute('capture', capture);
-    input.style.display = 'none';
+    // Safari / iOS WebKit blocks .click() if display is 'none'
+    input.style
+      ..position = 'fixed'
+      ..top = '-1000px'
+      ..left = '-1000px'
+      ..width = '1px'
+      ..height = '1px'
+      ..opacity = '0';
     web.document.body?.append(input);
+
+    JSFunction? focusListener;
     void finish(PickedFile? f) {
+      if (focusListener != null) {
+        try {
+          web.window.removeEventListener('focus', focusListener);
+        } catch (_) {}
+      }
       if (!c.isCompleted) c.complete(f);
       input.remove();
     }
+
+    focusListener = ((web.Event _) {
+      // Small delay: when camera picker is dismissed or closed on mobile, window regains focus
+      Future.delayed(const Duration(milliseconds: 700), () {
+        if (!c.isCompleted && (input.files == null || input.files!.length == 0)) {
+          finish(null);
+        }
+      });
+    }).toJS;
+    web.window.addEventListener('focus', focusListener);
 
     input.addEventListener(
       'change',
@@ -158,6 +182,12 @@ class WebBridge implements PlatformBridge {
     );
     input.addEventListener('cancel', ((web.Event _) => finish(null)).toJS);
     input.click();
+
+    // Safety timeout in case the browser blocks the picker silently
+    Timer(const Duration(seconds: 120), () {
+      if (!c.isCompleted) finish(null);
+    });
+
     return c.future;
   }
 

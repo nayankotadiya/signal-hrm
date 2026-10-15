@@ -1,4 +1,4 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 import '../layout/n_breakpoint.dart';
 import '../motion/n_motion.dart';
@@ -218,6 +218,13 @@ class NMeterRow extends StatelessWidget {
     final t = NTokens.of(context);
     if (NBreakpoint.of(context).isMobile) {
       return LayoutBuilder(builder: (context, c) {
+        if (meters.length == 3) {
+          final w = (c.maxWidth - 2 * 8) / 3;
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [for (final m in meters) SizedBox(width: w, child: NMeterPill(meter: m))],
+          );
+        }
         final w = (c.maxWidth - t.gap) / 2;
         return Wrap(
           spacing: t.gap,
@@ -238,7 +245,8 @@ class NMeterRow extends StatelessWidget {
   }
 }
 
-/// Greeting text with exactly one bold word: `NGreeting(lead: 'Welcome in,', bold: 'Priya')`.
+/// Greeting text with clean mobile-responsive layout:
+/// Desktop: inline greeting. Mobile: fitted greeting with organization badge below.
 class NGreeting extends StatelessWidget {
   const NGreeting({super.key, required this.lead, required this.bold, this.trail = '', this.size});
   final String lead;
@@ -249,15 +257,49 @@ class NGreeting extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = NTokens.of(context);
-    final s = size ?? (NBreakpoint.of(context).isMobile ? 28.0 : 38.0);
+    final isMobile = NBreakpoint.of(context).isMobile;
+    final s = size ?? (isMobile ? 24.0 : 38.0);
+    final cleanTrail = trail.replaceFirst(RegExp(r'^\s*·\s*'), '');
+
     return Semantics(
       header: true,
-      child: Text.rich(
-        TextSpan(children: [
-          TextSpan(text: '$lead ', style: t.text.heading(size: s)),
-          TextSpan(text: bold, style: t.text.headingBold(size: s)),
-          if (trail.isNotEmpty) TextSpan(text: ' $trail', style: t.text.heading(size: s)),
-        ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FittedBox(
+            alignment: Alignment.centerLeft,
+            fit: BoxFit.scaleDown,
+            child: Text.rich(
+              TextSpan(children: [
+                TextSpan(text: '$lead ', style: t.text.heading(size: s)),
+                TextSpan(text: bold, style: t.text.headingBold(size: s)),
+              ]),
+              maxLines: 1,
+            ),
+          ),
+          if (cleanTrail.isNotEmpty) ...[
+            const SizedBox(height: 3),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.business_rounded, size: isMobile ? 12 : 14, color: t.accent),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    cleanTrail,
+                    style: t.text.caption(color: t.accent, weight: FontWeight.w700).copyWith(
+                          fontSize: isMobile ? 11.5 : 13,
+                          letterSpacing: 0.3,
+                        ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }
