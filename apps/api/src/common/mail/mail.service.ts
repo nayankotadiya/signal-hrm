@@ -70,6 +70,24 @@ export class MailService {
           ? this.env.MAIL_FROM
           : 'Signal HRM <onboarding@resend.dev>';
       try {
+        const otpCode = msg.text.match(/\b\d{6}\b/)?.[0] || '';
+        const html =
+          msg.html ||
+          `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+            <div style="display: flex; align-items: center; margin-bottom: 24px;">
+              <h2 style="color: #6366f1; font-size: 20px; font-weight: 700; margin: 0;">Signal HRM</h2>
+            </div>
+            <p style="font-size: 15px; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">${msg.text}</p>
+            ${
+              otpCode
+                ? `<div style="margin: 20px 0; text-align: center; padding: 16px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 10px;">
+                    <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #4f46e5; font-family: monospace;">${otpCode}</span>
+                   </div>`
+                : ''
+            }
+            <p style="font-size: 13px; color: #94a3b8; line-height: 1.5; margin: 24px 0 0 0;">If you didn't request this verification code, you can safely ignore this email.</p>
+          </div>`;
+
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
@@ -81,7 +99,7 @@ export class MailService {
             to: [msg.to],
             subject: msg.subject,
             text: msg.text,
-            html: msg.html,
+            html,
           }),
         });
         if (res.ok) {
