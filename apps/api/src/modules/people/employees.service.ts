@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { z } from 'zod';
 import { AuditService, diff } from '../../common/audit/audit.service';
 import type { Ctx } from '../../common/auth/context';
+import { SOLE_SUPER_ADMIN_EMAIL } from '../../common/authz/catalog';
 import { PermissionsService } from '../../common/authz/permissions.service';
 import { ScopeService } from '../../common/authz/scope.service';
 import { encrypt, mask } from '../../common/crypto/crypto';
@@ -157,8 +158,15 @@ export class EmployeesService implements OnModuleInit {
 
   // ------------------------------------------------------------------ queries
 
+  private isSoleSuperAdmin(ctx: Ctx): boolean {
+    return ctx.authz.isSuperAdmin && ctx.user.email?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL;
+  }
+
   async list(ctx: Ctx, q: ListQuery & { departmentId?: string; teamId?: string; locationId?: string; managerId?: string; archived?: boolean }): Promise<Paged<any>> {
     const filter: Record<string, unknown> = await this.scope.filter(ctx, 'employees', 'view', '_id');
+    if (!this.isSoleSuperAdmin(ctx)) {
+      filter.contactEmail = { $ne: SOLE_SUPER_ADMIN_EMAIL };
+    }
     filter.status = q.archived ? { $in: ['exited', 'archived'] } : q.status ? q.status : { $nin: ['exited', 'archived'] };
     if (q.departmentId) filter.departmentId = oid(q.departmentId);
     if (q.teamId) filter.teamId = oid(q.teamId);
@@ -187,6 +195,7 @@ export class EmployeesService implements OnModuleInit {
   async get(ctx: Ctx, id: string): Promise<any> {
     const e = await this.employees.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!e || !(await this.scope.covers(ctx, 'employees', 'view', e._id))) throw notFound('Employee');
+    if (e.contactEmail?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL && !this.isSoleSuperAdmin(ctx)) throw notFound('Employee');
     const [dept, team, manager, location, shift, user] = await Promise.all([
       e.departmentId ? this.departments.findById(e.departmentId, { name: 1 }).lean<any>() : null,
       e.teamId ? this.teams.findById(e.teamId, { name: 1 }).lean<any>() : null,
@@ -212,6 +221,8 @@ export class EmployeesService implements OnModuleInit {
   }
 
   async historyOf(ctx: Ctx, id: string): Promise<any[]> {
+    const e = await this.employees.findOne({ _id: oid(id), organizationId: ctx.orgOid }, { contactEmail: 1 }).lean<any>();
+    if (!e || (e.contactEmail?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL && !this.isSoleSuperAdmin(ctx))) throw notFound('Employee');
     if (!(await this.scope.covers(ctx, 'employees', 'view', id))) throw notFound('Employee');
     return serialize(await this.history.find({ organizationId: ctx.orgOid, employeeId: oid(id) }).sort({ effectiveOn: -1, createdAt: -1 }).limit(200).lean());
   }
@@ -289,6 +300,7 @@ export class EmployeesService implements OnModuleInit {
   async update(ctx: Ctx, id: string, input: z.infer<typeof employeeUpdate>): Promise<any> {
     const before = await this.employees.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!before) throw notFound('Employee');
+    if (before.contactEmail?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL && !this.isSoleSuperAdmin(ctx)) throw notFound('Employee');
     if (!(await this.scope.covers(ctx, 'employees', 'edit', before._id))) throw forbidden('FORBIDDEN', "You don't have permission to edit this employee.");
     await this.validateRefs(ctx, input, id);
     const { effectiveOn, note, ...fields } = input;
@@ -320,6 +332,7 @@ export class EmployeesService implements OnModuleInit {
   async updateSensitive(ctx: Ctx, id: string, input: z.infer<typeof sensitiveInput>): Promise<any> {
     const e = await this.employees.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!e) throw notFound('Employee');
+    if (e.contactEmail?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL && !this.isSoleSuperAdmin(ctx)) throw notFound('Employee');
     if (!(await this.canSensitive(ctx, e._id, 'edit'))) throw forbidden('FORBIDDEN', "You don't have permission to edit sensitive details.");
     const key = secretOf(this.env, 'ENCRYPTION_KEY');
     const set: Record<string, unknown> = {};
@@ -351,6 +364,8 @@ export class EmployeesService implements OnModuleInit {
   // ------------------------------------------------------------------ onboarding and offboarding
 
   async checklist(ctx: Ctx, id: string, kind: 'onboarding' | 'offboarding'): Promise<any> {
+    const e = await this.employees.findOne({ _id: oid(id), organizationId: ctx.orgOid }, { contactEmail: 1 }).lean<any>();
+    if (!e || (e.contactEmail?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL && !this.isSoleSuperAdmin(ctx))) throw notFound('Employee');
     if (!(await this.scope.covers(ctx, 'employees', 'view', id))) throw notFound('Employee');
     const c = await this.checklists.findOne({ organizationId: ctx.orgOid, employeeId: oid(id), kind }).sort({ createdAt: -1 }).lean<any>();
     if (!c) return null;

@@ -51,6 +51,8 @@ export const RESOURCES = {
 } as const;
 export type Resource = keyof typeof RESOURCES;
 
+export const SOLE_SUPER_ADMIN_EMAIL = 'nayankotadiya686@gmail.com';
+
 export const ROLES = ['super_admin', 'admin', 'hr', 'manager', 'employee', 'moderator', 'user'] as const;
 export type RoleKey = (typeof ROLES)[number];
 

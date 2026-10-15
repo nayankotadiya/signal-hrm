@@ -120,7 +120,7 @@ class _SetupPageState extends State<SetupPage> {
     return AuthFrame(
       child: AutofillGroup(
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('Set up Signal HRM', style: t.text.heading(size: 26)),
+          Text('Set up Bulletproof Brands HRM', style: t.text.heading(size: 26)),
           const SizedBox(height: 4),
           Text('Create your organization and the first administrator. This works once, on a new server.', style: t.text.body(color: t.muted)),
           const SizedBox(height: 16),

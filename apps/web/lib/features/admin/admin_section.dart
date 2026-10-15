@@ -147,7 +147,7 @@ class OrganizationTab extends StatelessWidget {
             ],
             onSaved: reload,
           ),
-          if (context.me.permissions.isSuperAdmin)
+          if (context.me.isSuperAdmin)
             _SettingsCard(
               title: 'Security (Super Admin)',
               section: 'security',
@@ -1315,3 +1315,4 @@ class IntegrationsTab extends StatelessWidget {
     );
   }
 }
+

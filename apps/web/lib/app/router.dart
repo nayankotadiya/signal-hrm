@@ -94,21 +94,19 @@ class SplashPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = NTokens.of(context);
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: NPageBackground(
         child: Center(
           child: Semantics(
-            label: 'Loading Signal HRM',
+            label: 'Loading Signal HRM — Bulletproof Brands',
             // Continues the HTML splash (same mark, rings and shimmer) while the session restores.
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const SignalMark(size: 64),
-              const SizedBox(height: 22),
-              const SignalWordmark(size: 28),
-              FittedBox(fit: BoxFit.scaleDown, child: Text('PEOPLE · WORK · TIME', style: t.text.caption().copyWith(letterSpacing: 1.2))),
-              const SizedBox(height: 22),
-              const SignalLoadingBar(),
+            child: const Column(mainAxisSize: MainAxisSize.min, children: [
+              SignalMark(size: 64),
+              SizedBox(height: 22),
+              SignalWordmark(size: 28),
+              SizedBox(height: 22),
+              SignalLoadingBar(),
             ]),
           ),
         ),

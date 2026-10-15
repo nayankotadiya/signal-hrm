@@ -3,7 +3,7 @@ import { Model, Types } from 'mongoose';
 import { z } from 'zod';
 import { AuditService } from '../../common/audit/audit.service';
 import type { Ctx } from '../../common/auth/context';
-import { ROLES, RoleKey, parseGrant } from '../../common/authz/catalog';
+import { ROLES, RoleKey, parseGrant, SOLE_SUPER_ADMIN_EMAIL } from '../../common/authz/catalog';
 import { PermissionsService } from '../../common/authz/permissions.service';
 import { hashPassword, randomToken, sha256, temporaryPassword } from '../../common/crypto/crypto';
 import { ApiError } from '../../common/errors/api-error';
@@ -45,15 +45,25 @@ export class UsersService {
     @InjectModel('Organization') private readonly orgs: Model<any>,
   ) {}
 
+  private isSoleSuperAdmin(ctx: Ctx): boolean {
+    return ctx.authz.isSuperAdmin && ctx.user.email?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL;
+  }
+
+  private isTargetSoleSuperAdmin(user: any): boolean {
+    return user?.role === 'super_admin' || user?.email?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL;
+  }
+
   async list(ctx: Ctx, q: ListQuery & { role?: string }): Promise<Paged<any>> {
     PermissionsService.require(ctx, 'users', 'view', 'organization');
+    const isSole = this.isSoleSuperAdmin(ctx);
     const filter: Record<string, unknown> = { organizationId: ctx.orgOid };
-    if (!ctx.authz.isSuperAdmin) {
+    if (!isSole) {
       filter.role = { $ne: 'super_admin' };
+      filter.email = { $ne: SOLE_SUPER_ADMIN_EMAIL };
     }
     if (q.status) filter.status = q.status;
     if (q.role) {
-      if (q.role === 'super_admin' && !ctx.authz.isSuperAdmin) {
+      if (q.role === 'super_admin' && !isSole) {
         return { items: [], page: q.page, limit: q.limit, total: 0, hasMore: false };
       }
       filter.role = q.role;
@@ -73,7 +83,7 @@ export class UsersService {
     if (id !== ctx.user.userId) PermissionsService.require(ctx, 'users', 'view', 'organization');
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }, PUBLIC_FIELDS).lean<any>();
     if (!user) throw notFound('User');
-    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin && String(user._id) !== ctx.user.userId) {
+    if (this.isTargetSoleSuperAdmin(user) && !this.isSoleSuperAdmin(ctx) && String(user._id) !== ctx.user.userId) {
       throw notFound('User');
     }
     return serialize(user);
@@ -83,7 +93,8 @@ export class UsersService {
   async create(ctx: Ctx, input: z.infer<typeof createUserInput>): Promise<any> {
     PermissionsService.require(ctx, 'users', 'create', 'organization');
     if (!input.email && !input.phone) throw badRequest('CONTACT_REQUIRED', 'Add an email address or phone number.', 'email');
-    if (input.role === 'super_admin') throw forbidden('USE_SUPER_ADMIN_FLOW', 'Create Super Admins from Security with re-authentication.');
+    if (input.role === 'super_admin') throw forbidden('SUPER_ADMIN_LOCKED', 'New Super Admins cannot be created.');
+    if (input.email?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL) throw forbidden('SUPER_ADMIN_LOCKED', 'Super Admin account is reserved.');
     if (!PermissionsService.canAssignRole(ctx, input.role)) throw forbidden('GRANT_AUTHORITY', "You can't assign a role with permissions you don't hold.");
     if (input.email && (await this.users.exists({ organizationId: ctx.orgOid, email: input.email }))) {
       throw conflict('EMAIL_TAKEN', 'An account with this email already exists.');
@@ -162,7 +173,7 @@ export class UsersService {
     PermissionsService.require(ctx, 'users', 'create', 'organization');
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
-    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('User');
+    if (this.isTargetSoleSuperAdmin(user) && !this.isSoleSuperAdmin(ctx)) throw notFound('User');
     if (user.status !== 'invited') throw conflict('ALREADY_ACTIVE', 'This person already accepted their invitation.');
     await this.invite(ctx, user);
     return { sent: true };
@@ -181,7 +192,8 @@ export class UsersService {
     if (!passwordLoginOn) throw conflict('PASSWORD_LOGIN_DISABLED', 'Turn on password sign-in first (server setting PASSWORD_LOGIN or Security settings).');
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
-    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('User');
+    if (this.isTargetSoleSuperAdmin(user) && !this.isSoleSuperAdmin(ctx)) throw notFound('User');
+    if (this.isTargetSoleSuperAdmin(user)) throw forbidden('SUPER_ADMIN_IMMUTABLE', 'Super Admin password cannot be reset via temporary password.');
     if (String(user._id) === ctx.user.userId) throw forbidden('SELF_TEMP_PASSWORD', 'Change your own password from your account page.');
     if (['suspended', 'blocked', 'inactive'].includes(user.status)) throw conflict('ACCOUNT_NOT_ACTIVE', 'Reactivate this account before setting a password.');
     const temporary = temporaryPassword();
@@ -198,12 +210,9 @@ export class UsersService {
     PermissionsService.require(ctx, 'users', 'manage', 'organization');
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
-    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('User');
+    if (this.isTargetSoleSuperAdmin(user) && !this.isSoleSuperAdmin(ctx)) throw notFound('User');
+    if (this.isTargetSoleSuperAdmin(user)) throw forbidden('SUPER_ADMIN_IMMUTABLE', 'The Super Admin account cannot be deactivated or suspended.');
     if (String(user._id) === ctx.user.userId) throw forbidden('SELF_STATUS', "You can't change your own account status.");
-    if (user.role === 'super_admin' && status !== 'active') {
-      const others = await this.users.countDocuments({ organizationId: ctx.orgOid, role: 'super_admin', status: 'active', _id: { $ne: user._id } });
-      if (others === 0) throw conflict('LAST_SUPER_ADMIN', 'The last active Super Admin cannot be suspended.');
-    }
     await this.users.updateOne({ _id: user._id }, { $set: { status } });
     if (status !== 'active') await this.sessions.revokeAll(user._id, `status_${status}`);
     await this.audit.record(ctx, { action: `user.${status}`, resourceType: 'user', resourceId: user._id, changes: { status: { from: user.status, to: status }, ...(reason ? { reason: { from: null, to: reason } } : {}) } });
@@ -212,16 +221,13 @@ export class UsersService {
 
   /** Role change: validated against the caller's grant authority, audited, sessions keep working with refreshed permissions. */
   async setRole(ctx: Ctx, id: string, role: RoleKey): Promise<any> {
+    if (role === 'super_admin') throw forbidden('SUPER_ADMIN_LOCKED', 'Super Admin role cannot be assigned.');
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
-    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('User');
+    if (this.isTargetSoleSuperAdmin(user) && !this.isSoleSuperAdmin(ctx)) throw notFound('User');
+    if (this.isTargetSoleSuperAdmin(user)) throw forbidden('SUPER_ADMIN_IMMUTABLE', 'The Super Admin role cannot be changed.');
     if (String(user._id) === ctx.user.userId) throw forbidden('SELF_ROLE', "You can't change your own role.");
-    if (role === 'super_admin') throw forbidden('USE_SUPER_ADMIN_FLOW', 'Create Super Admins from Security with re-authentication.');
     if (!PermissionsService.canAssignRole(ctx, role)) throw forbidden('GRANT_AUTHORITY', "You can't assign a role with permissions you don't hold.");
-    if (user.role === 'super_admin') {
-      const others = await this.users.countDocuments({ organizationId: ctx.orgOid, role: 'super_admin', status: 'active', _id: { $ne: user._id } });
-      if (others === 0) throw conflict('LAST_SUPER_ADMIN', 'The last Super Admin cannot be demoted.');
-    }
     await this.users.updateOne({ _id: user._id }, { $set: { role }, $inc: { permissionsVersion: 1 } });
     this.perms.invalidate(String(user._id));
     await this.changes.create({ organizationId: ctx.orgOid, actorId: ctx.userOid, targetUserId: user._id, roleKey: role, change: 'role_assigned', before: { role: user.role }, after: { role } });
@@ -234,7 +240,8 @@ export class UsersService {
     if (!PermissionsService.canGrant(ctx, grant)) throw forbidden('GRANT_AUTHORITY', "You can't grant a permission you don't hold at that scope.");
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
-    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('User');
+    if (this.isTargetSoleSuperAdmin(user) && !this.isSoleSuperAdmin(ctx)) throw notFound('User');
+    if (this.isTargetSoleSuperAdmin(user)) throw forbidden('SUPER_ADMIN_IMMUTABLE', 'Super Admin permissions are fixed.');
     await this.userPerms.updateOne(
       { organizationId: ctx.orgOid, userId: user._id, grant },
       { $set: { recordIds, reason, expiresAt, grantedBy: ctx.userOid } },
@@ -251,7 +258,8 @@ export class UsersService {
     if (!PermissionsService.canGrant(ctx, grant)) throw forbidden('GRANT_AUTHORITY', "You can't remove a permission you couldn't grant.");
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
-    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin) throw notFound('User');
+    if (this.isTargetSoleSuperAdmin(user) && !this.isSoleSuperAdmin(ctx)) throw notFound('User');
+    if (this.isTargetSoleSuperAdmin(user)) throw forbidden('SUPER_ADMIN_IMMUTABLE', 'Super Admin permissions are fixed.');
     const r = await this.userPerms.deleteOne({ organizationId: ctx.orgOid, userId: oid(id), grant });
     if (!r.deletedCount) throw notFound('Permission');
     await this.users.updateOne({ _id: oid(id) }, { $inc: { permissionsVersion: 1 } });
@@ -266,33 +274,17 @@ export class UsersService {
     PermissionsService.require(ctx, 'roles', 'view', 'organization');
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
-    if (user.role === 'super_admin' && !ctx.authz.isSuperAdmin && String(user._id) !== ctx.user.userId) throw notFound('User');
+    if (this.isTargetSoleSuperAdmin(user) && !this.isSoleSuperAdmin(ctx) && String(user._id) !== ctx.user.userId) throw notFound('User');
     const grants = await this.perms.grantsFor({ userId: String(user._id), orgId: ctx.user.orgId, role: user.role, sessionId: '', name: user.fullName }, user.permissionsVersion);
     const extras = await this.userPerms.find({ organizationId: ctx.orgOid, userId: user._id }).lean();
-    return { role: user.role, effective: PermissionsService.describe(PermissionsService.build(grants, user.role)), individual: serialize(extras) };
+    return { role: user.role, effective: PermissionsService.describe(PermissionsService.build(grants, user.role, user.email)), individual: serialize(extras) };
   }
 
   /**
-   * Super Admin creation: existing Super Admin only, after strong re-authentication (enforced by the
-   * controller), audited, and every Super Admin receives a security notification.
+   * Super Admin creation: locked down so only nayankotadiya686@gmail.com can ever be Super Admin.
    */
   async createSuperAdmin(ctx: Ctx, input: { fullName: string; email: string }): Promise<any> {
-    if (!ctx.authz.isSuperAdmin) throw forbidden('SUPER_ADMIN_ONLY', 'Only a Super Admin can create another Super Admin.');
-    if (await this.users.exists({ organizationId: ctx.orgOid, email: input.email.toLowerCase() })) throw conflict('EMAIL_TAKEN', 'An account with this email already exists.');
-    const user = await this.users.create({ organizationId: ctx.orgOid, fullName: input.fullName, email: input.email.toLowerCase(), role: 'super_admin', status: 'invited', invitedBy: ctx.userOid, createdBy: ctx.userOid });
-    await this.invite(ctx, user);
-    await this.changes.create({ organizationId: ctx.orgOid, actorId: ctx.userOid, targetUserId: user._id, roleKey: 'super_admin', change: 'role_assigned', after: { role: 'super_admin' } });
-    await this.audit.record(ctx, { action: 'user.super_admin_created', resourceType: 'user', resourceId: user._id });
-    await this.alerts.create({ organizationId: ctx.orgOid, type: 'new_super_admin', severity: 'high', userId: user._id, message: `${ctx.user.name} created a new Super Admin (${input.email}).` });
-    const admins = await this.users.find({ organizationId: ctx.orgOid, role: 'super_admin', status: 'active' }, { _id: 1 }).lean();
-    await this.notifications.notify(ctx.orgOid, admins.map((a: any) => a._id), {
-      event: 'security_alert',
-      title: 'New Super Admin created',
-      body: `${ctx.user.name} invited ${input.fullName} as Super Admin.`,
-      link: '/security',
-      priority: 'essential',
-    });
-    return serialize({ ...user.toObject(), passwordHash: undefined });
+    throw forbidden('SUPER_ADMIN_LOCKED', 'Only nayankotadiya686@gmail.com is allowed as Super Admin.');
   }
 
   static ensure(cond: unknown, code: string, message: string): void {

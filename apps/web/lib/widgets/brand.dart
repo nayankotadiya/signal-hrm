@@ -98,7 +98,7 @@ class _SignalMarkState extends State<SignalMark> with SingleTickerProviderStateM
   }
 }
 
-/// "Signal HRM" with the gradient on "HRM".
+/// "Signal HRM" with the gradient on "HRM", and "Bulletproof Brands" as a subtitle.
 class SignalWordmark extends StatelessWidget {
   const SignalWordmark({super.key, this.size = 22});
   final double size;
@@ -109,17 +109,32 @@ class SignalWordmark extends StatelessWidget {
     final base = t.text.title(size: size).copyWith(color: t.ink);
     return FittedBox(
       fit: BoxFit.scaleDown,
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Text('Signal ', style: base.copyWith(fontWeight: FontWeight.w300)),
-        ShaderMask(
-          blendMode: BlendMode.srcIn,
-          shaderCallback: (r) => LinearGradient(colors: [t.chartStart, t.chartEnd]).createShader(r),
-          child: Text('HRM', style: base.copyWith(fontWeight: FontWeight.w600)),
-        ),
-      ]),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('Signal ', style: base.copyWith(fontWeight: FontWeight.w300)),
+            ShaderMask(
+              blendMode: BlendMode.srcIn,
+              shaderCallback: (r) => LinearGradient(colors: [t.chartStart, t.chartEnd]).createShader(r),
+              child: Text('HRM', style: base.copyWith(fontWeight: FontWeight.w600)),
+            ),
+          ]),
+          Text(
+            'Bulletproof Brands',
+            style: t.text.caption(color: t.muted).copyWith(
+              fontSize: size * 0.52,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
+
 
 /// Indeterminate progress shimmer under the splash.
 class SignalLoadingBar extends StatefulWidget {

@@ -99,7 +99,7 @@ export class AuthGuard implements CanActivate {
       reauthAt: session.reauthAt,
     };
     const grants = await this.perms.grantsFor(authUser, user.permissionsVersion ?? 1);
-    const authz = PermissionsService.build(grants, user.role);
+    const authz = PermissionsService.build(grants, user.role, user.email);
     const ctx: Ctx = {
       user: authUser,
       authz,

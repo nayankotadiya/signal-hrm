@@ -242,18 +242,35 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: 10),
           if (!bp.isMobile || NBreakpoint.widthOf(context) > 380)
             Flexible(
-              child: Text.rich(
-                TextSpan(children: [
-                  TextSpan(text: 'Signal ', style: t.text.title(size: 18).copyWith(fontWeight: FontWeight.w300)),
-                  TextSpan(text: 'HRM', style: t.text.title(size: 18).copyWith(fontWeight: FontWeight.w600)),
-                ]),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text.rich(
+                    TextSpan(children: [
+                      TextSpan(text: 'Signal ', style: t.text.title(size: 18).copyWith(fontWeight: FontWeight.w300)),
+                      TextSpan(text: 'HRM', style: t.text.title(size: 18).copyWith(fontWeight: FontWeight.w600)),
+                    ]),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    'Bulletproof Brands',
+                    style: t.text.caption(color: t.muted).copyWith(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.3,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ),
             ),
         ]),
       ),
     );
+
 
     return Padding(
       padding: EdgeInsets.fromLTRB(bp.isMobile ? 14 : 22, bp.isMobile ? 10 : 16, bp.isMobile ? 14 : 22, 8),

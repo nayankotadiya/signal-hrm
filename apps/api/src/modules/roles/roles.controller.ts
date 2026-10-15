@@ -4,7 +4,7 @@ import { Model } from 'mongoose';
 import { z } from 'zod';
 import { AuditService } from '../../common/audit/audit.service';
 import { C, Can, Ctx, RequireReauth } from '../../common/auth/context';
-import { ACTIONS, DEFAULT_ROLE_GRANTS, parseGrant, RESOURCES, ROLES, RoleKey, SCOPES } from '../../common/authz/catalog';
+import { ACTIONS, DEFAULT_ROLE_GRANTS, parseGrant, RESOURCES, ROLES, RoleKey, SCOPES, SOLE_SUPER_ADMIN_EMAIL } from '../../common/authz/catalog';
 import { PermissionsService } from '../../common/authz/permissions.service';
 import { badRequest, forbidden, listQuery, notFound, parse } from '../../common/http/validation';
 import { InjectModel, serialize } from '../../database/model';
@@ -21,22 +21,30 @@ export class RolesController {
     @InjectModel('PermissionChange') private readonly changes: Model<any>,
   ) {}
 
+  private isSoleSuperAdmin(ctx: Ctx): boolean {
+    return ctx.authz.isSuperAdmin && ctx.user.email?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL;
+  }
+
   /** Catalog for the permission matrix UI. */
   @Get('catalog')
   @Can('roles', 'view')
   catalog(@C() ctx: Ctx) {
-    const roles = ctx.authz.isSuperAdmin ? ROLES : ROLES.filter((r) => r !== 'super_admin');
+    const roles = this.isSoleSuperAdmin(ctx) ? ROLES : ROLES.filter((r) => r !== 'super_admin');
     return { resources: RESOURCES, actions: ACTIONS, scopes: SCOPES, roles, defaults: DEFAULT_ROLE_GRANTS };
   }
 
   @Get()
   @Can('roles', 'view')
   async list(@C() ctx: Ctx) {
+    const isSole = this.isSoleSuperAdmin(ctx);
     const filter: Record<string, unknown> = { organizationId: ctx.orgOid };
-    if (!ctx.authz.isSuperAdmin) filter.key = { $ne: 'super_admin' };
+    if (!isSole) filter.key = { $ne: 'super_admin' };
     const rows = await this.roles.find(filter).sort({ key: 1 }).lean<any[]>();
     const matchUsers: Record<string, unknown> = { organizationId: ctx.orgOid };
-    if (!ctx.authz.isSuperAdmin) matchUsers.role = { $ne: 'super_admin' };
+    if (!isSole) {
+      matchUsers.role = { $ne: 'super_admin' };
+      matchUsers.email = { $ne: SOLE_SUPER_ADMIN_EMAIL };
+    }
     const counts = await this.users.aggregate([{ $match: matchUsers }, { $group: { _id: '$role', n: { $sum: 1 } } }]);
     const countOf = new Map(counts.map((c: any) => [c._id, c.n]));
     return { items: serialize(rows).map((r: any) => ({ ...r, userCount: countOf.get(r.key) ?? 0 })) };
@@ -95,9 +103,17 @@ export class RolesController {
     const roles = await this.roles.find({ organizationId: ctx.orgOid, grants: { $regex: `^${q.resource}:${q.action}:` } }).lean<any[]>();
     const roleScope = new Map(roles.map((r) => [r.key, r.grants.filter((g: string) => g.startsWith(prefix)).map((g: string) => g.split(':')[2])]));
     const direct = await this.userPerms.find({ organizationId: ctx.orgOid, grant: { $regex: `^${q.resource}:${q.action}:` } }).lean<any[]>();
-    const users = await this.users
-      .find({ organizationId: ctx.orgOid, status: { $in: ['active', 'invited', 'pending'] }, $or: [{ role: { $in: [...roleScope.keys()] } }, { _id: { $in: direct.map((d) => d.userId) } }] }, { fullName: 1, role: 1, status: 1 })
-      .lean<any[]>();
+    const isSole = this.isSoleSuperAdmin(ctx);
+    const userMatch: Record<string, unknown> = {
+      organizationId: ctx.orgOid,
+      status: { $in: ['active', 'invited', 'pending'] },
+      $or: [{ role: { $in: [...roleScope.keys()] } }, { _id: { $in: direct.map((d) => d.userId) } }],
+    };
+    if (!isSole) {
+      userMatch.role = { $ne: 'super_admin' };
+      userMatch.email = { $ne: SOLE_SUPER_ADMIN_EMAIL };
+    }
+    const users = await this.users.find(userMatch, { fullName: 1, role: 1, status: 1 }).lean<any[]>();
     return {
       items: users.map((u) => ({
         id: String(u._id),
@@ -114,9 +130,12 @@ export class RolesController {
   @Can('roles', 'view')
   async history(@C() ctx: Ctx, @Query() query: unknown) {
     const q = parse(listQuery, query);
+    const isSole = this.isSoleSuperAdmin(ctx);
+    const filter: Record<string, unknown> = { organizationId: ctx.orgOid };
+    if (!isSole) filter.roleKey = { $ne: 'super_admin' };
     const [items, total] = await Promise.all([
-      this.changes.find({ organizationId: ctx.orgOid }).sort({ at: -1 }).skip((q.page - 1) * q.limit).limit(q.limit).lean(),
-      this.changes.countDocuments({ organizationId: ctx.orgOid }),
+      this.changes.find(filter).sort({ at: -1 }).skip((q.page - 1) * q.limit).limit(q.limit).lean(),
+      this.changes.countDocuments(filter),
     ]);
     return { items: serialize(items), page: q.page, limit: q.limit, total, hasMore: q.page * q.limit < total };
   }

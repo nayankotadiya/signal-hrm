@@ -215,7 +215,7 @@ class _LoginPageState extends State<LoginPage> {
         if (_server?['setupAvailable'] == true) ...[
           const NBanner(message: "This server isn't set up yet. Create the first administrator to start.", tone: NBannerTone.info),
           const SizedBox(height: 10),
-          NButton(label: 'Set up Signal HRM', icon: Icons.rocket_launch_outlined, variant: NButtonVariant.accent, onPressed: () => context.go('/setup')),
+          NButton(label: 'Set up Bulletproof Brands HRM', icon: Icons.rocket_launch_outlined, variant: NButtonVariant.accent, onPressed: () => context.go('/setup')),
           const SizedBox(height: 18),
         ],
       ];

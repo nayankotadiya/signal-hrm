@@ -21,8 +21,10 @@ class Me {
   Json? get preferences => (raw['preferences'] as Map?)?.cast<String, dynamic>();
   Json get attendanceSettings => (organization['attendance'] as Map?)?.cast<String, dynamic>() ?? const {};
 
+  static const _soleSuperAdminEmail = 'nayankotadiya686@gmail.com';
+
   String get role => '${raw['role'] ?? 'user'}';
-  bool get isSuperAdmin => role == 'super_admin';
+  bool get isSuperAdmin => role == 'super_admin' && email?.toLowerCase() == _soleSuperAdminEmail;
   String get userId => '${user['id'] ?? ''}';
   String? get employeeId => employee?['id'] as String?;
   String get name => '${user['displayName'] ?? user['fullName'] ?? ''}';

@@ -67,7 +67,7 @@ class HealthTab extends StatelessWidget {
             NStatusChip.health(healthOf(health['state']), labelOverride: 'Overall: ${Fmt.label(health['state'])}'),
             Text('Checked ${Fmt.time(health['checkedAt'])} · ${health['environment'] ?? ''} · v${health['version'] ?? '?'}', style: t.text.caption()),
             NButton(label: 'Refresh', icon: Icons.refresh_rounded, compact: true, variant: NButtonVariant.secondary, onPressed: reload),
-            if (me.permissions.isSuperAdmin)
+            if (me.isSuperAdmin)
               NButton(
                 label: 'Purge Demo Data',
                 icon: Icons.delete_sweep_rounded,
@@ -250,7 +250,7 @@ class _BackupsTabState extends State<BackupsTab> {
             Toolbar(children: [
               NButton(label: 'Back up now', icon: Icons.backup_rounded, compact: true, variant: NButtonVariant.accent, busy: _busy, onPressed: () => _run(() => context.api.post('/backups', body: {'kind': 'manual'}), 'Backup finished. Verification runs next.')),
               NButton(label: 'Run restore test', icon: Icons.science_rounded, compact: true, variant: NButtonVariant.secondary, busy: _busy, onPressed: () => _run(() => context.api.post('/backups/restore-test'), 'Restore test finished.')),
-              if (me.permissions.isSuperAdmin)
+              if (me.isSuperAdmin)
                 NButton(
                   label: 'Purge Demo Data',
                   icon: Icons.delete_sweep_rounded,
@@ -277,7 +277,7 @@ class _BackupsTabState extends State<BackupsTab> {
                               ? Wrap(children: [
                                   if (b['status'] == 'uploaded' || b['status'] == 'verified')
                                     IconButton(tooltip: 'Verify again', icon: const Icon(Icons.fact_check_rounded, size: 18), onPressed: () => _run(() => context.api.post('/backups/${b['id']}/verify'), 'Verification finished.')),
-                                  if (b['status'] == 'verified' && me.permissions.isSuperAdmin)
+                                  if (b['status'] == 'verified' && me.isSuperAdmin)
                                     IconButton(
                                       tooltip: 'Restore from this backup',
                                       icon: Icon(Icons.settings_backup_restore_rounded, size: 18, color: t.dangerText),
@@ -599,3 +599,4 @@ Future<void> _confirmPurgeDemoData(BuildContext context, VoidCallback reload) as
     if (context.mounted) showError(context, e);
   }
 }
+

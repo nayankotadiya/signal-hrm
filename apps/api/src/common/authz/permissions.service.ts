@@ -14,6 +14,7 @@ import {
   ROLES,
   Scope,
   scopeRank,
+  SOLE_SUPER_ADMIN_EMAIL,
   SUPER_ADMIN_ONLY,
 } from './catalog';
 
@@ -70,7 +71,7 @@ export class PermissionsService {
     this.cache.clear();
   }
 
-  static build(grants: Grant[], role: string): Authz {
+  static build(grants: Grant[], role: string, email?: string): Authz {
     const best = new Map<string, Scope>();
     const records = new Map<string, string[]>();
     for (const g of grants) {
@@ -79,9 +80,10 @@ export class PermissionsService {
       if (!cur || scopeRank(g.scope) > scopeRank(cur)) best.set(k, g.scope);
       if (g.scope === 'records' && g.recordIds?.length) records.set(k, [...(records.get(k) ?? []), ...g.recordIds]);
     }
+    const isSuperAdmin = role === 'super_admin' && (!email || email.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL);
     return {
       grants,
-      isSuperAdmin: role === 'super_admin',
+      isSuperAdmin,
       scope: (r, a) => best.get(`${r}:${a}`) ?? null,
       can: (r, a, atLeast) => {
         const s = best.get(`${r}:${a}`);
@@ -115,7 +117,8 @@ export class PermissionsService {
 
   static canAssignRole(ctx: Ctx, role: string): boolean {
     if (!ROLES.includes(role as RoleKey)) return false;
-    if (role === 'super_admin') return ctx.authz.isSuperAdmin;
+    // Nobody can ever assign super_admin. nayankotadiya686@gmail.com is the sole Super Admin.
+    if (role === 'super_admin') return false;
     if (!ctx.authz.can('roles', 'manage')) return false;
     // A role may be assigned only if every grant it carries could be granted by the caller.
     return ctx.authz.isSuperAdmin || DEFAULT_ROLE_GRANTS[role as RoleKey].every((s) => PermissionsService.canGrant(ctx, s));

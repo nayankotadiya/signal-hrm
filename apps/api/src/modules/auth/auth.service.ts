@@ -488,9 +488,9 @@ export class AuthService {
       user.employeeId ? this.employees.findById(user.employeeId, { sensitive: 0 }).lean<any>() : null,
       this.prefs.findOne({ organizationId: user.organizationId, userId: user._id }).lean<any>(),
     ]);
-    const authUser = { userId: String(user._id), orgId: String(user.organizationId), role: user.role, sessionId: '', name: user.fullName };
+    const authUser = { userId: String(user._id), orgId: String(user.organizationId), role: user.role, sessionId: '', name: user.fullName, email: user.email };
     const grants = await this.perms.grantsFor(authUser, user.permissionsVersion ?? 1);
-    const authz = PermissionsService.build(grants, user.role);
+    const authz = PermissionsService.build(grants, user.role, user.email);
     return {
       user: serialize({ ...user, hasPassword: !!user.passwordHash, mustChangePassword: !!user.mustChangePassword, passwordHash: undefined, googleSub: undefined, appleSub: undefined, failedLogins: undefined }),
       employee: serialize(employee),

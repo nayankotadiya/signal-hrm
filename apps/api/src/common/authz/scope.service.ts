@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '../../database/model';
 import type { Ctx } from '../auth/context';
-import { Action, Resource, Scope } from './catalog';
+import { Action, Resource, Scope, SOLE_SUPER_ADMIN_EMAIL } from './catalog';
 import { PermissionsService } from './permissions.service';
 
 /**
@@ -68,12 +68,33 @@ export class ScopeService {
     const scope = PermissionsService.require(ctx, resource, action);
     const ids = await this.employeeIds(ctx, scope, resource, action);
     const base: Record<string, unknown> = { organizationId: ctx.orgOid };
+
+    // Super Admin isolation: Non-super-admins cannot view or query Super Admin's records
+    const isSoleSuperAdmin = ctx.user.email?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL;
+    if (!isSoleSuperAdmin) {
+      const saEmp = await this.employees.findOne({ organizationId: ctx.orgOid, contactEmail: SOLE_SUPER_ADMIN_EMAIL }, { _id: 1 }).lean<any>();
+      if (saEmp) {
+        if (ids === null) {
+          return { ...base, [field]: { $ne: saEmp._id } };
+        } else {
+          return { ...base, [field]: { $in: ids.filter((id) => String(id) !== String(saEmp._id)) } };
+        }
+      }
+    }
+
     if (ids === null) return base;
     return { ...base, [field]: { $in: ids } };
   }
 
   /** True when the given employee falls inside the caller's scope for resource:action. */
   async covers(ctx: Ctx, resource: Resource, action: Action, employeeId: unknown): Promise<boolean> {
+    const isSoleSuperAdmin = ctx.user.email?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL;
+    if (!isSoleSuperAdmin) {
+      const saEmp = await this.employees.findOne({ organizationId: ctx.orgOid, contactEmail: SOLE_SUPER_ADMIN_EMAIL }, { _id: 1 }).lean<any>();
+      if (saEmp && String(saEmp._id) === String(employeeId)) {
+        return false; // Non-super-admins can NEVER view or cover Super Admin records
+      }
+    }
     const scope = ctx.authz.scope(resource, action);
     if (!scope) return false;
     const ids = await this.employeeIds(ctx, scope, resource, action);
