@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../layout/n_breakpoint.dart';
 import '../tokens/n_tokens.dart';
 import 'n_button.dart';
 import 'n_toast.dart';
@@ -148,23 +149,33 @@ class NCardTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = NTokens.of(context);
+    final isMobile = NBreakpoint.of(context).isMobile;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      // The trailing widget (a chip or button) is capped at 45% of the width so large text or a
-      // narrow screen never squeezes the title to nothing or pushes the trailing off the card.
       child: LayoutBuilder(
-        builder: (context, box) => Row(children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Semantics(header: true, child: Text(title, style: t.text.title(size: 15))),
-              if (subtitle != null) Text(subtitle!, style: t.text.caption()),
-            ]),
-          ),
-          if (trailing != null) ...[
-            const SizedBox(width: 8),
-            ConstrainedBox(constraints: BoxConstraints(maxWidth: box.maxWidth.isFinite ? box.maxWidth * 0.45 : double.infinity), child: trailing!),
+        builder: (context, box) => Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Semantics(header: true, child: Text(title, style: t.text.title(size: 15))),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(subtitle!, style: t.text.caption()),
+                ],
+              ]),
+            ),
+            if (trailing != null) ...[
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: box.maxWidth.isFinite ? box.maxWidth * (isMobile ? 0.55 : 0.45) : double.infinity,
+                ),
+                child: trailing!,
+              ),
+            ],
           ],
-        ]),
+        ),
       ),
     );
   }

@@ -266,18 +266,6 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     return r * c;
   }
 
-  Future<void> _resetDemo() async {
-    try {
-      await context.api.post('/attendance/reset-demo');
-      if (!mounted) return;
-      NToast.of(context).show('Attendance demo reset. You can test from Step 1 again.');
-      _view.currentState?.reload();
-      widget.onChanged?.call();
-    } catch (e) {
-      if (mounted) showError(context, e);
-    }
-  }
-
   Future<void> _requestException(Json today) async {
     final r = await showNConfirm(
       context,
@@ -855,13 +843,6 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 10),
-                NButton(
-                  label: 'Reset demo punches (Start from Step 1)',
-                  icon: Icons.refresh_rounded,
-                  variant: NButtonVariant.secondary,
-                  onPressed: _resetDemo,
-                ),
               ],
 
               // Footer helper details
@@ -881,14 +862,6 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                           style: t.text.caption(),
                         ),
                       ),
-                      if (step > 0 && AppConfig.demo)
-                        InkWell(
-                          onTap: _resetDemo,
-                          child: Text(
-                            'Reset demo',
-                            style: t.text.caption(weight: FontWeight.w600).copyWith(color: t.accent),
-                          ),
-                        ),
                     ],
                   ),
                 ),

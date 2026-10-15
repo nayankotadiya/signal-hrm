@@ -215,29 +215,47 @@ class _SetupChecklistState extends State<_SetupChecklist> {
         final pending = steps.where((s) => s['done'] != true).toList();
         final fraction = total == 0 ? 0.0 : (done / total).clamp(0.0, 1.0);
 
+        final isMobile = NBreakpoint.of(context).isMobile;
+
         return InfoCard(
           title: 'Setup checklist',
           subtitle: '$done of $total complete${remaining > 0 ? ' · $remaining required left' : ' · Optional steps'}',
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 90,
-                child: NProgressBar(fraction: fraction, semanticLabel: 'Setup progress'),
-              ),
-              const SizedBox(width: 8),
-              NButton(
-                label: _expanded ? 'Hide' : 'View ($done/$total)',
-                compact: true,
-                variant: NButtonVariant.secondary,
-                icon: _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
-                onPressed: () => setState(() => _expanded = !_expanded),
-              ),
-            ],
-          ),
+          trailing: isMobile
+              ? NButton(
+                  label: _expanded ? 'Hide' : 'View ($done/$total)',
+                  compact: true,
+                  variant: NButtonVariant.secondary,
+                  icon: _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                  onPressed: () => setState(() => _expanded = !_expanded),
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 90,
+                      child: NProgressBar(fraction: fraction, semanticLabel: 'Setup progress'),
+                    ),
+                    const SizedBox(width: 8),
+                    NButton(
+                      label: _expanded ? 'Hide' : 'View ($done/$total)',
+                      compact: true,
+                      variant: NButtonVariant.secondary,
+                      icon: _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                      onPressed: () => setState(() => _expanded = !_expanded),
+                    ),
+                  ],
+                ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (isMobile) ...[
+                const SizedBox(height: 2),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                  child: NProgressBar(fraction: fraction, semanticLabel: 'Setup progress'),
+                ),
+                const SizedBox(height: 10),
+              ],
               if (!_expanded) ...[
                 if (pending.isNotEmpty)
                   InkWell(
