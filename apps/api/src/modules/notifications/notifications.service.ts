@@ -41,13 +41,16 @@ export const NOTIFICATION_EVENTS = [
   'travel_decided',
   'database_storage_critical',
   'attendance_checkout_reminder',
+  'attendance_check_in',
+  'attendance_check_out',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number] | string;
 export const CHANNELS = ['in_app', 'email', 'push', 'whatsapp', 'sms'] as const;
 
-const EMAIL_BY_DEFAULT = new Set([
+export const EMAIL_BY_DEFAULT = new Set([
   'security_alert',
   'approval_pending',
+  'leave_submitted',
   'leave_decided',
   'expense_decided',
   'payslip_available',
@@ -57,7 +60,121 @@ const EMAIL_BY_DEFAULT = new Set([
   'travel_decided',
   'database_storage_critical',
   'attendance_checkout_reminder',
+  'attendance_check_in',
+  'attendance_check_out',
+  'task_assigned',
+  'meeting_scheduled',
+  'announcement',
 ]);
+
+export function getEventEmailStyle(event: string): { badge: string; badgeColor: string; badgeBg: string; linkText: string } {
+  switch (event) {
+    case 'attendance_check_in':
+      return { badge: 'Check-In Confirmed', badgeColor: '#166534', badgeBg: '#dcfce7', linkText: 'View Attendance' };
+    case 'attendance_check_out':
+      return { badge: 'Check-Out Confirmed', badgeColor: '#1e40af', badgeBg: '#dbeafe', linkText: 'View Attendance Summary' };
+    case 'attendance_checkout_reminder':
+      return { badge: '7:00 PM Check-Out Reminder', badgeColor: '#b45309', badgeBg: '#fef3c7', linkText: 'Check Out Now' };
+    case 'attendance_reminder':
+      return { badge: 'Attendance Reminder', badgeColor: '#b45309', badgeBg: '#fef3c7', linkText: 'Open Attendance' };
+    case 'leave_submitted':
+      return { badge: 'Leave Submitted', badgeColor: '#6b21a8', badgeBg: '#f3e8ff', linkText: 'View Leave Request' };
+    case 'leave_decided':
+      return { badge: 'Leave Status Update', badgeColor: '#0369a1', badgeBg: '#e0f2fe', linkText: 'View Leaves' };
+    case 'payroll_finalized':
+    case 'payslip_available':
+      return { badge: 'Payroll & Payslip', badgeColor: '#047857', badgeBg: '#d1fae5', linkText: 'View Payslip' };
+    case 'task_assigned':
+    case 'task_overdue':
+      return { badge: 'Task Notification', badgeColor: '#4338ca', badgeBg: '#e0e7ff', linkText: 'View Task' };
+    case 'security_alert':
+    case 'system_incident':
+      return { badge: 'Security Notice', badgeColor: '#b91c1c', badgeBg: '#fee2e2', linkText: 'Review Security Alert' };
+    case 'announcement':
+      return { badge: 'Company Announcement', badgeColor: '#0f172a', badgeBg: '#f1f5f9', linkText: 'Read Announcement' };
+    default:
+      return {
+        badge: event.replace(/_/g, ' ').toUpperCase(),
+        badgeColor: '#e50914',
+        badgeBg: '#fee2e2',
+        linkText: 'Open in HRM',
+      };
+  }
+}
+
+export function buildBulletproofEmailHtml(opts: {
+  title: string;
+  body?: string;
+  badge?: string;
+  badgeColor?: string;
+  badgeBg?: string;
+  link?: string;
+  linkText?: string;
+  recipientName?: string;
+  recipientEmail?: string;
+  publicWebUrl?: string;
+}): string {
+  const badgeText = opts.badge || 'Notification';
+  const badgeColor = opts.badgeColor || '#e50914';
+  const badgeBg = opts.badgeBg || '#fee2e2';
+  const linkText = opts.linkText || 'Open in Bulletproof HRM';
+  const year = new Date().getFullYear();
+  const ctaUrl = opts.link
+    ? `${opts.publicWebUrl || ''}${opts.link.startsWith('/') ? '' : '/'}${opts.link}`
+    : null;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${opts.title}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f1f5f9; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 580px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06); border: 1px solid #e2e8f0;">
+          <tr>
+            <td style="background-color: #0b0f19; padding: 26px 32px; text-align: center; border-bottom: 3px solid #e50914;">
+              <a href="https://bulletproofbrands.in" target="_blank" style="text-decoration: none; display: inline-block;">
+                <img src="https://bulletproofbrands.in/cdn/shop/files/bpb-brand-logo_png.png?v=1790428996" alt="Bulletproof Brands" width="220" style="display: block; max-width: 220px; height: auto; border: 0; margin: 0 auto;" />
+              </a>
+              <div style="margin-top: 8px; font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #94a3b8; text-transform: uppercase;">
+                IMPOSSIBLE TO IGNORE
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 36px 32px 28px 32px;">
+              <div style="margin-bottom: 18px;">
+                <span style="display: inline-block; padding: 5px 12px; background: ${badgeBg}; color: ${badgeColor}; border-radius: 6px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">${badgeText}</span>
+              </div>
+              <h1 style="margin: 0 0 16px 0; color: #0f172a; font-size: 20px; font-weight: 700; line-height: 1.4;">${opts.title}</h1>
+              ${opts.body ? `<div style="font-size: 15px; color: #334155; line-height: 1.65; margin: 0 0 24px 0;">${opts.body.replace(/\n/g, '<br/>')}</div>` : ''}
+              ${ctaUrl ? `<div style="margin: 28px 0 10px 0;">
+                <a href="${ctaUrl}" style="display: inline-block; padding: 11px 24px; background: #0b0f19; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; border: 1px solid #e50914; box-shadow: 0 2px 6px rgba(0,0,0,0.12);">${linkText} &rarr;</a>
+              </div>` : ''}
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f8fafc; padding: 22px 32px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="margin: 0 0 6px 0; color: #64748b; font-size: 12px; font-weight: 600;">
+                Bulletproof Brands HRM &bull; Workforce Management
+              </p>
+              <p style="margin: 0; color: #94a3b8; font-size: 11px; line-height: 1.5;">
+                This automated notification was sent to <strong style="color: #64748b;">${opts.recipientEmail || opts.recipientName || 'you'}</strong>.<br/>
+                &copy; ${year} Bulletproof Brands. All rights reserved.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
 
 export interface NotifyInput {
   event: NotificationEvent;
@@ -113,7 +230,7 @@ export class NotificationsService implements OnModuleInit {
       for (const userId of unique) {
         const ch = prefBy.get(String(userId))?.[input.event] ?? {};
         const inApp = essential || ch.in_app !== false;
-        const email = essential ? true : ch.email !== false;
+        const email = essential ? true : (ch.email !== undefined ? !!ch.email : EMAIL_BY_DEFAULT.has(input.event));
         const push = essential || ch.push !== false;
         let notificationId: Types.ObjectId | undefined;
         if (inApp) {
@@ -229,19 +346,22 @@ export class NotificationsService implements OnModuleInit {
           const tpl = await this.templates.findOne({ organizationId: d.organizationId, event: d.event, channel: 'email', active: true }).lean<any>();
           const vars: Record<string, string> = { name: user.fullName || user.email, title: n.title, body: n.body ?? '', link: n.link ?? '' };
           const fill = (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_m, k) => vars[k] ?? '');
-          const subject = tpl?.subject ? fill(tpl.subject) : `[Signal HRM] ${n.title}`;
-          const text = tpl?.body ? fill(tpl.body) : `${n.title}\n\n${n.body ?? ''}${n.link ? `\n\nLink: ${this.env.PUBLIC_WEB_URL}${n.link.startsWith('/') ? '' : '/'}${n.link}` : ''}`;
-          const html = `
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-  <div style="margin-bottom: 16px;">
-    <span style="display: inline-block; padding: 4px 10px; background: #e0f2fe; color: #0369a1; border-radius: 6px; font-size: 12px; font-weight: 600; text-transform: uppercase;">Signal HRM</span>
-  </div>
-  <h2 style="margin: 0 0 12px 0; color: #0f172a; font-size: 19px; font-weight: 600; line-height: 1.4;">${n.title}</h2>
-  ${n.body ? `<p style="margin: 0 0 20px 0; color: #334155; font-size: 14.5px; line-height: 1.6;">${n.body.replace(/\n/g, '<br/>')}</p>` : ''}
-  ${n.link ? `<div style="margin-top: 20px;"><a href="${this.env.PUBLIC_WEB_URL}${n.link.startsWith('/') ? '' : '/'}${n.link}" style="display: inline-block; padding: 9px 18px; background: #2563eb; color: #ffffff; text-decoration: none; border-radius: 7px; font-weight: 600; font-size: 13.5px;">Open in Signal HRM</a></div>` : ''}
-  <hr style="margin: 28px 0 14px 0; border: none; border-top: 1px solid #f1f5f9;" />
-  <p style="margin: 0; color: #94a3b8; font-size: 11.5px;">This notification was sent to ${user.fullName || user.email} by Signal HRM.</p>
-</div>`;
+          const subject = tpl?.subject ? fill(tpl.subject) : `[Bulletproof Brands] ${n.title}`;
+          const rawBody = tpl?.body ? fill(tpl.body) : (n.body ?? '');
+          const text = `${n.title}\n\n${rawBody}${n.link ? `\n\nLink: ${this.env.PUBLIC_WEB_URL}${n.link.startsWith('/') ? '' : '/'}${n.link}` : ''}\n\nBulletproof Brands - IMPOSSIBLE TO IGNORE`;
+          const style = getEventEmailStyle(d.event);
+          const html = buildBulletproofEmailHtml({
+            title: n.title,
+            body: rawBody,
+            badge: style.badge,
+            badgeColor: style.badgeColor,
+            badgeBg: style.badgeBg,
+            link: n.link,
+            linkText: style.linkText,
+            recipientName: user.fullName,
+            recipientEmail: user.email,
+            publicWebUrl: this.env.PUBLIC_WEB_URL,
+          });
 
           await this.mail.send({ to: user.email, subject, text, html });
           await this.deliveries.updateOne({ _id: d._id }, { $set: { status: 'sent', sentAt: new Date(), error: null } });
@@ -287,11 +407,18 @@ export class NotificationsService implements OnModuleInit {
     const org = await this.orgSettings.get(ctx.orgOid);
     const essential: string[] = org?.settings?.notifications?.essentialEvents ?? [];
     return {
-      events: NOTIFICATION_EVENTS.map((e) => ({
-        event: e,
-        essential: essential.includes(e),
-        channels: { in_app: p?.channels?.[e]?.in_app ?? true, email: p?.channels?.[e]?.email ?? EMAIL_BY_DEFAULT.has(e) },
-      })),
+      events: NOTIFICATION_EVENTS.map((e) => {
+        const isEss = essential.includes(e);
+        const stored = p?.channels?.[e];
+        return {
+          event: e,
+          essential: isEss,
+          channels: {
+            in_app: isEss ? true : (stored?.in_app ?? true),
+            email: isEss ? true : (stored?.email !== undefined ? stored.email : EMAIL_BY_DEFAULT.has(e)),
+          },
+        };
+      }),
       availableChannels: ['in_app', 'email', ...(this.mail.configured ? [] : [])],
     };
   }
@@ -299,13 +426,27 @@ export class NotificationsService implements OnModuleInit {
   async setPreferences(ctx: Ctx, channels: Record<string, Record<string, boolean>>): Promise<any> {
     const org = await this.orgSettings.get(ctx.orgOid);
     const essential: string[] = org?.settings?.notifications?.essentialEvents ?? [];
-    const clean: Record<string, Record<string, boolean>> = {};
+    const setUpdates: Record<string, any> = {};
     for (const [event, ch] of Object.entries(channels)) {
-      if (!NOTIFICATION_EVENTS.includes(event as any)) throw badRequest('UNKNOWN_EVENT', `Unknown event ${event}.`);
-      // Essential security and system notices can't be switched off.
-      clean[event] = essential.includes(event) ? { in_app: true, email: true } : { in_app: ch.in_app !== false, email: !!ch.email };
+      if (!NOTIFICATION_EVENTS.includes(event as any)) continue;
+      const isEss = essential.includes(event);
+      if (ch.in_app !== undefined) {
+        setUpdates[`channels.${event}.in_app`] = isEss ? true : !!ch.in_app;
+      }
+      if (ch.email !== undefined) {
+        setUpdates[`channels.${event}.email`] = isEss ? true : !!ch.email;
+      }
+      if (ch.push !== undefined) {
+        setUpdates[`channels.${event}.push`] = isEss ? true : !!ch.push;
+      }
     }
-    await this.prefs.updateOne({ organizationId: ctx.orgOid, userId: ctx.userOid }, { $set: { channels: clean } }, { upsert: true });
+    if (Object.keys(setUpdates).length > 0) {
+      await this.prefs.updateOne(
+        { organizationId: ctx.orgOid, userId: ctx.userOid },
+        { $set: setUpdates },
+        { upsert: true },
+      );
+    }
     return this.getPreferences(ctx);
   }
 

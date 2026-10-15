@@ -130,54 +130,165 @@ class _NotificationPrefs extends StatefulWidget {
 }
 
 class _NotificationPrefsState extends State<_NotificationPrefs> {
+  bool _loading = true;
+  String? _error;
+  List<Map<String, dynamic>> _events = [];
+  final Map<String, Map<String, bool>> _channels = {};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadPrefs());
+  }
+
+  Future<void> _loadPrefs() async {
+    try {
+      final res = jsonMap(await context.api.get('/notifications/preferences'));
+      final rawEvents = jsonList(res['events']);
+      final events = <Map<String, dynamic>>[];
+      for (final raw in rawEvents) {
+        final m = jsonMap(raw);
+        final eventKey = '${m['event']}';
+        events.add(m);
+        final chMap = jsonMap(m['channels']);
+        _channels[eventKey] = {
+          'in_app': chMap['in_app'] == true,
+          'email': chMap['email'] == true,
+        };
+      }
+      if (mounted) {
+        setState(() {
+          _events = events;
+          _loading = false;
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = '$e';
+        });
+      }
+    }
+  }
+
+  void _onToggle(String event, String channel, bool newValue) {
+    // 1. Instant optimistic UI update - 0ms response time
+    setState(() {
+      _channels.putIfAbsent(event, () => {})[channel] = newValue;
+    });
+
+    // 2. Persist in background without wiping or reloading
+    context.api.put('/notifications/preferences', body: {
+      'channels': {
+        event: {channel: newValue},
+      },
+    }).catchError((Object e) {
+      if (mounted) {
+        setState(() {
+          _channels.putIfAbsent(event, () => {})[channel] = !newValue;
+        });
+        showError(context, e);
+      }
+    });
+  }
+
+  String _formatEventLabel(String event) {
+    switch (event) {
+      case 'attendance_check_in':
+        return 'Check-in confirmation';
+      case 'attendance_check_out':
+        return 'Check-out confirmation';
+      case 'attendance_checkout_reminder':
+        return '7:00 PM check-out reminder';
+      case 'attendance_reminder':
+        return 'Attendance reminder';
+      case 'leave_submitted':
+        return 'Leave request submitted';
+      case 'leave_decided':
+        return 'Leave approval / status update';
+      case 'expense_submitted':
+        return 'Expense reimbursement submitted';
+      case 'expense_decided':
+        return 'Expense approval / payment';
+      case 'payslip_available':
+        return 'Monthly payslip published';
+      case 'task_assigned':
+        return 'New task assignment';
+      case 'meeting_scheduled':
+        return 'Meeting scheduled / updated';
+      case 'announcement':
+        return 'Company announcement';
+      default:
+        return Fmt.label(event);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = NTokens.of(context);
     return InfoCard(
       title: 'Notifications',
       subtitle: 'Essential notices (security, legal) are always delivered.',
-      child: AsyncView<Json>(
-        load: () async => jsonMap(await context.api.get('/notifications/preferences')),
-        builder: (context, p, reload) {
-          final events = jsonList(p['events']);
-          Future<void> set(String event, String channel, bool v) async {
-            try {
-              await context.api.put('/notifications/preferences', body: {
-                'channels': {
-                  event: {channel: v},
-                },
-              });
-              reload();
-            } catch (e) {
-              if (context.mounted) showError(context, e);
-            }
-          }
-
-          return Column(children: [
-            const _PushAlertsRow(),
-            Row(children: [
-              const Expanded(child: SizedBox()),
-              SizedBox(width: 56, child: Text('In app', textAlign: TextAlign.center, style: t.text.caption())),
-              SizedBox(width: 56, child: Text('Email', textAlign: TextAlign.center, style: t.text.caption())),
-            ]),
-            for (final e in events)
-              Row(children: [
-                Expanded(child: Text('${Fmt.label(e['event'])}${e['essential'] == true ? ' (essential)' : ''}', style: t.text.body())),
-                for (final ch in ['in_app', 'email'])
-                  SizedBox(
-                    width: 56,
-                    child: Checkbox(
-                      value: jsonMap(e['channels'])[ch] == true,
-                      onChanged: e['essential'] == true ? null : (v) => set('${e['event']}', ch, v ?? false),
-                      activeColor: t.primaryButton,
-                      checkColor: t.onPrimaryButton,
-                      semanticLabel: '${Fmt.label(e['event'])} by ${ch == 'email' ? 'email' : 'in app'}',
-                    ),
+      child: _loading
+          ? const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            )
+          : _error != null
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Row(
+                    children: [
+                      Expanded(child: Text('Could not load preferences: $_error', style: t.text.caption(color: t.dangerText))),
+                      TextButton(onPressed: _loadPrefs, child: const Text('Retry')),
+                    ],
                   ),
-              ]),
-          ]);
-        },
-      ),
+                )
+              : Column(children: [
+                  const _PushAlertsRow(),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    const Expanded(child: SizedBox()),
+                    SizedBox(width: 56, child: Text('In app', textAlign: TextAlign.center, style: t.text.caption())),
+                    SizedBox(width: 56, child: Text('Email', textAlign: TextAlign.center, style: t.text.caption())),
+                  ]),
+                  const SizedBox(height: 4),
+                  for (final e in _events) ...[
+                    Builder(builder: (context) {
+                      final eventKey = '${e['event']}';
+                      final isEssential = e['essential'] == true;
+                      final label = _formatEventLabel(eventKey);
+                      final inAppVal = isEssential ? true : (_channels[eventKey]?['in_app'] ?? true);
+                      final emailVal = isEssential ? true : (_channels[eventKey]?['email'] ?? false);
+
+                      return Row(children: [
+                        Expanded(child: Text('$label${isEssential ? ' (essential)' : ''}', style: t.text.body())),
+                        SizedBox(
+                          width: 56,
+                          child: Checkbox(
+                            value: inAppVal,
+                            onChanged: isEssential ? null : (v) => _onToggle(eventKey, 'in_app', v ?? false),
+                            activeColor: t.primaryButton,
+                            checkColor: t.onPrimaryButton,
+                            semanticLabel: '$label in app',
+                          ),
+                        ),
+                        SizedBox(
+                          width: 56,
+                          child: Checkbox(
+                            value: emailVal,
+                            onChanged: isEssential ? null : (v) => _onToggle(eventKey, 'email', v ?? false),
+                            activeColor: t.primaryButton,
+                            checkColor: t.onPrimaryButton,
+                            semanticLabel: '$label by email',
+                          ),
+                        ),
+                      ]);
+                    }),
+                  ],
+                ]),
     );
   }
 }

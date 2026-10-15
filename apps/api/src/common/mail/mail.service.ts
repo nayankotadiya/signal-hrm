@@ -66,19 +66,26 @@ export class MailService {
     const otpCode = msg.text.match(/\b\d{6}\b/)?.[0] || '';
     const html =
       msg.html ||
-      `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-        <div style="display: flex; align-items: center; margin-bottom: 24px;">
-          <h2 style="color: #6366f1; font-size: 20px; font-weight: 700; margin: 0;">Signal HRM</h2>
+      `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 540px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 14px; background: #ffffff; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+        <div style="background-color: #0b0f19; padding: 22px 24px; text-align: center; border-bottom: 3px solid #e50914;">
+          <a href="https://bulletproofbrands.in" target="_blank" style="text-decoration: none; display: inline-block;">
+            <img src="https://bulletproofbrands.in/cdn/shop/files/bpb-brand-logo_png.png?v=1790428996" alt="Bulletproof Brands" width="200" style="display: block; max-width: 200px; height: auto; border: 0; margin: 0 auto;" />
+          </a>
+          <div style="margin-top: 6px; font-size: 10px; font-weight: 700; letter-spacing: 2px; color: #94a3b8; text-transform: uppercase;">IMPOSSIBLE TO IGNORE</div>
         </div>
-        <p style="font-size: 15px; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">${msg.text}</p>
-        ${
-          otpCode
-            ? `<div style="margin: 20px 0; text-align: center; padding: 16px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 10px;">
-                <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #4f46e5; font-family: monospace;">${otpCode}</span>
-               </div>`
-            : ''
-        }
-        <p style="font-size: 13px; color: #94a3b8; line-height: 1.5; margin: 24px 0 0 0;">If you didn't request this email, you can safely ignore it.</p>
+        <div style="padding: 28px 24px;">
+          <h2 style="color: #0f172a; font-size: 18px; font-weight: 700; margin: 0 0 14px 0;">${msg.subject}</h2>
+          <p style="font-size: 15px; color: #334155; line-height: 1.6; margin: 0 0 18px 0;">${msg.text.replace(/\n/g, '<br/>')}</p>
+          ${
+            otpCode
+              ? `<div style="margin: 22px 0; text-align: center; padding: 18px; background: #f8fafc; border: 1.5px dashed #cbd5e1; border-radius: 12px;">
+                  <span style="font-size: 34px; font-weight: 800; letter-spacing: 7px; color: #0b0f19; font-family: monospace;">${otpCode}</span>
+                 </div>`
+              : ''
+          }
+          <hr style="margin: 26px 0 14px 0; border: none; border-top: 1px solid #f1f5f9;" />
+          <p style="font-size: 12px; color: #94a3b8; line-height: 1.5; margin: 0;">This email was sent by Bulletproof Brands HRM. If you didn't request this email, you can safely ignore it.</p>
+        </div>
       </div>`;
 
     // 1. Brevo HTTP API (Port 443 HTTPS - Delivers to ANY registered recipient without domain restriction)
@@ -86,8 +93,8 @@ export class MailService {
       const from =
         this.env.MAIL_FROM && !this.env.MAIL_FROM.includes('localhost') && !this.env.MAIL_FROM.includes('resend.dev')
           ? this.env.MAIL_FROM
-          : 'Signal HRM <bulletproofbrands137@gmail.com>';
-      const fromName = from.includes('<') ? from.split('<')[0].trim() : 'Signal HRM';
+          : 'Bulletproof Brands <bulletproofbrands137@gmail.com>';
+      const fromName = from.includes('<') ? from.split('<')[0].trim() : 'Bulletproof Brands';
       const fromEmail = from.includes('<') ? from.split('<')[1].replace('>', '').trim() : from;
       try {
         const res = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -128,7 +135,7 @@ export class MailService {
       const from =
         this.env.MAIL_FROM && !this.env.MAIL_FROM.includes('localhost')
           ? this.env.MAIL_FROM
-          : 'Signal HRM <onboarding@resend.dev>';
+          : 'Bulletproof Brands <bulletproofbrands137@gmail.com>';
       try {
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
@@ -171,7 +178,7 @@ export class MailService {
       throw new Error('Email is not configured (RESEND_API_KEY, SMTP_HOST or SMTP_USER).');
     }
 
-    const defaultFrom = this.env.SMTP_USER ? `Signal HRM <${this.env.SMTP_USER}>` : undefined;
+    const defaultFrom = this.env.SMTP_USER ? `Bulletproof Brands <${this.env.SMTP_USER}>` : undefined;
     const from = (this.env.MAIL_FROM && !this.env.MAIL_FROM.includes('localhost'))
       ? this.env.MAIL_FROM
       : (defaultFrom || this.env.MAIL_FROM);
