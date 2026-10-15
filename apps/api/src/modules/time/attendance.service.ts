@@ -115,7 +115,15 @@ export class AttendanceService implements OnModuleInit {
       workDate: day,
       timezone: org.timezone,
       record: serialize(record),
-      state: !record?.checkIn ? 'not_checked_in' : !record.checkOut ? 'checked_in' : 'checked_out',
+      state: (() => {
+        if (!record?.checkIn) return 'not_checked_in';
+        const sessions: any[] = record?.sessions && record.sessions.length > 0
+          ? record.sessions
+          : (record?.checkIn ? [{ checkIn: record.checkIn, checkOut: record.checkOut }] : []);
+        const last = sessions.length > 0 ? sessions[sessions.length - 1] : null;
+        const isOpen = last && !last.checkOut;
+        return isOpen ? 'checked_in' : 'checked_out';
+      })(),
       dayCount: record?.dayCount ?? (record?.checkOut ? (record?.status === 'half_day' ? 0.5 : 1.0) : (record?.checkIn ? 0.5 : 0.0)),
       shift: shift ? { ...serialize(shift), lengthMinutes: shiftLength(shift) } : null,
       location: location ? { id: String(location._id), name: location.name, latitude: location.latitude, longitude: location.longitude, radiusMeters: location.radiusMeters } : null,
@@ -176,9 +184,21 @@ export class AttendanceService implements OnModuleInit {
     const now = new Date(); // server time, always
     const { day } = localParts(now, org.timezone);
     const existing = await this.openOrToday(ctx.orgOid, emp._id, day, org);
-    if (action === 'checkIn' && existing?.checkIn) throw conflict('ALREADY_CHECKED_IN', `You already checked in at ${this.fmt(existing.checkIn.at, org)}.`);
-    if (action === 'checkOut' && !existing?.checkIn) throw conflict('NOT_CHECKED_IN', 'Check in first.');
-    if (action === 'checkOut' && existing?.checkOut) throw conflict('ALREADY_CHECKED_OUT', `You already checked out at ${this.fmt(existing.checkOut.at, org)}.`);
+    const existingSessions: any[] = existing?.sessions && existing.sessions.length > 0
+      ? existing.sessions
+      : (existing?.checkIn ? [{ checkIn: existing.checkIn, checkOut: existing.checkOut, durationMinutes: existing.workedMinutes }] : []);
+    const lastExistingSession = existingSessions.length > 0 ? existingSessions[existingSessions.length - 1] : null;
+    const isSessionOpen = !!(lastExistingSession && !lastExistingSession.checkOut);
+
+    if (action === 'checkIn' && isSessionOpen) {
+      throw conflict('ALREADY_CHECKED_IN', `You are already checked in at ${this.fmt(lastExistingSession.checkIn.at, org)}.`);
+    }
+    if (action === 'checkOut' && !existing?.checkIn) {
+      throw conflict('NOT_CHECKED_IN', 'Check in first.');
+    }
+    if (action === 'checkOut' && !isSessionOpen) {
+      throw conflict('ALREADY_CHECKED_OUT', `You are already checked out. Check in first to resume.`);
+    }
     const workDate: string = existing?.workDate ?? day;
     const actionKey = action === 'checkIn' ? 'check_in' : 'check_out';
 
@@ -265,24 +285,98 @@ export class AttendanceService implements OnModuleInit {
     let record: any;
     if (action === 'checkIn') {
       const late = shift ? this.lateMinutes(now, workDate, shift, org.timezone) : 0;
-      try {
+      const newSession = { checkIn: punch };
+      if (!existing) {
+        try {
+          record = await this.attendance.findOneAndUpdate(
+            { organizationId: ctx.orgOid, employeeId: emp._id, workDate },
+            {
+              $set: {
+                checkIn: punch,
+                sessions: [newSession],
+                shiftId: shift?._id,
+                lateMinutes: late,
+                status: late > 0 ? 'late' : 'present',
+              },
+              $unset: { checkOut: '' },
+            },
+            { upsert: true, new: true },
+          );
+        } catch (e: any) {
+          if (e?.code === 11000) throw conflict('ALREADY_CHECKED_IN', 'You already checked in today.');
+          throw e;
+        }
+      } else {
+        const gapMin = lastExistingSession?.checkOut?.at
+          ? Math.max(0, Math.round((now.getTime() - new Date(lastExistingSession.checkOut.at).getTime()) / 60_000))
+          : 0;
+        const breakMinutes = (existing.breakMinutes ?? 0) + gapMin;
         record = await this.attendance.findOneAndUpdate(
-          { organizationId: ctx.orgOid, employeeId: emp._id, workDate, 'checkIn.at': { $exists: false } },
-          { $set: { checkIn: punch, shiftId: shift?._id, lateMinutes: late, status: late > 0 ? 'late' : 'present' } },
-          { upsert: true, new: true },
+          { _id: existing._id },
+          {
+            $push: { sessions: newSession },
+            $set: { breakMinutes },
+            $unset: { checkOut: '' },
+          },
+          { new: true },
         );
-      } catch (e: any) {
-        if (e?.code === 11000) throw conflict('ALREADY_CHECKED_IN', 'You already checked in today.');
-        throw e;
       }
     } else {
-      const totals = this.totals(existing.checkIn.at, now, shift, org, existing.lateMinutes ?? 0, workDate);
+      const updatedSessions = [...existingSessions];
+      const activeIdx = updatedSessions.length - 1;
+      const activeSession = updatedSessions[activeIdx];
+      const sessionDuration = Math.max(0, Math.round((now.getTime() - new Date(activeSession.checkIn.at).getTime()) / 60_000));
+      updatedSessions[activeIdx] = {
+        ...activeSession,
+        checkOut: punch,
+        durationMinutes: sessionDuration,
+      };
+
+      let totalWorked = updatedSessions.reduce((sum: number, s: any) => sum + (s.durationMinutes || 0), 0);
+      let finalBreakMinutes = existing.breakMinutes ?? 0;
+
+      if (updatedSessions.length === 1 && totalWorked >= 270) {
+        finalBreakMinutes = shift?.breakMinutes ?? 60;
+        totalWorked = Math.max(0, totalWorked - finalBreakMinutes);
+      }
+
+      let overtime = 0;
+      let early = 0;
+      if (shift) {
+        const len = shiftLength(shift) - (shift.breakMinutes ?? 60);
+        const threshold = shift.overtimeAfterMinutes || len;
+        overtime = Math.max(0, totalWorked - threshold);
+        const end = zonedTimeToUtc(toMinutes(shift.endTime) <= toMinutes(shift.startTime) ? addDays(workDate, 1) : workDate, shift.endTime, org.timezone);
+        early = Math.max(0, Math.floor((end.getTime() - now.getTime()) / 60_000));
+      }
+
+      let dayCount = 0.0;
+      let status = 'incomplete';
+      if (totalWorked >= 360) {
+        dayCount = 1.0;
+        status = (existing.lateMinutes ?? 0) > 0 ? 'late' : 'present';
+      } else if (totalWorked >= 150) {
+        dayCount = 0.5;
+        status = 'half_day';
+      }
+
       record = await this.attendance.findOneAndUpdate(
-        { _id: existing._id, 'checkOut.at': { $exists: false } },
-        { $set: { checkOut: punch, ...totals } },
+        { _id: existing._id },
+        {
+          $set: {
+            checkOut: punch,
+            sessions: updatedSessions,
+            breakMinutes: finalBreakMinutes,
+            workedMinutes: totalWorked,
+            overtimeMinutes: overtime,
+            earlyLeaveMinutes: early,
+            status,
+            dayCount,
+          },
+        },
         { new: true },
       );
-      if (!record) throw conflict('ALREADY_CHECKED_OUT', 'You already checked out.');
+      if (!record) throw conflict('ALREADY_CHECKED_OUT', 'Record not found.');
     }
 
     if (selfieFile) {

@@ -98,6 +98,15 @@ const PunchSchema = new Schema(
   { _id: false },
 );
 
+const SessionSchema = new Schema(
+  {
+    checkIn: { type: PunchSchema, required: true },
+    checkOut: PunchSchema,
+    durationMinutes: { type: Number, default: 0 },
+  },
+  { _id: false },
+);
+
 export const AttendanceSchema = orgScoped(
   new Schema(
     {
@@ -106,6 +115,7 @@ export const AttendanceSchema = orgScoped(
       shiftId: ObjectId,
       checkIn: PunchSchema,
       checkOut: PunchSchema,
+      sessions: [SessionSchema],
       breakMinutes: { type: Number, default: 0 },
       workedMinutes: { type: Number, default: 0 },
       overtimeMinutes: { type: Number, default: 0 },

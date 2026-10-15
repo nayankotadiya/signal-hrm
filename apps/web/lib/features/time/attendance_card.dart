@@ -125,7 +125,7 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
 
   Future<void> _punch(Json today, {String? exceptionReason, bool remote = false}) async {
     final state = '${today['state']}';
-    final isCheckIn = state == 'not_checked_in';
+    final isCheckIn = state != 'checked_in';
     final action = isCheckIn ? 'check-in' : 'check-out';
     final req = jsonMap(jsonMap(today['requirements'])[isCheckIn ? 'checkIn' : 'checkOut']);
     final needLocation = req['requireLocation'] != false;
@@ -207,8 +207,8 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
       final punchTime = punch['at'] != null ? Fmt.time(punch['at']) : 'now';
 
       final successMsg = isCheckIn
-          ? 'Check-in recorded at $punchTime. Morning shift active (10:00 AM – 1:00 PM).'
-          : 'Check-out recorded at $punchTime. Day attendance completed!';
+          ? 'Check-in recorded at $punchTime.'
+          : 'Check-out recorded at $punchTime.';
 
       NToast.of(context).show(r['exception'] == true
           ? 'Recorded at $punchTime. Your exception was sent for approval.'
@@ -309,16 +309,23 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     final outLat = checkOut['latitude'];
     final outLng = checkOut['longitude'];
     final workedMins = (rec['workedMinutes'] as num? ?? 0).toInt();
+    final breakMins = (rec['breakMinutes'] as num? ?? 0).toInt();
+    final sessionsList = (rec['sessions'] as List<dynamic>?)?.map((s) => jsonMap(s)).toList() ?? [];
 
     final hasCheckedIn = inTime != null;
     final hasCheckedOut = outTime != null;
+    final isCheckedIn = state == 'checked_in';
 
-    final badgeLabel = hasCheckedOut
-        ? (dayCount >= 1.0 ? '1.0 Full Day' : '0.5 Half Day')
-        : (hasCheckedIn ? 'Checked In' : 'Not Checked In');
-    final badgeColor = hasCheckedOut
-        ? (dayCount >= 1.0 ? t.green : t.amber)
-        : (hasCheckedIn ? t.accent : t.muted);
+    final badgeLabel = isCheckedIn
+        ? 'Active Session'
+        : (hasCheckedOut
+            ? (dayCount >= 1.0 ? '1.0 Full Day' : (dayCount >= 0.5 ? '0.5 Half Day' : 'Paused / On Break'))
+            : (hasCheckedIn ? 'Checked In' : 'Not Started'));
+    final badgeColor = isCheckedIn
+        ? t.accent
+        : (hasCheckedOut
+            ? (dayCount >= 1.0 ? t.green : t.amber)
+            : t.muted);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 12),
@@ -366,20 +373,20 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
             title: 'Morning Shift',
             timing: '10:00 AM – 1:00 PM',
             duration: '3 hrs',
-            status: hasCheckedIn ? (hasCheckedOut ? 'Done' : 'Active') : 'Upcoming',
+            status: hasCheckedIn ? (hasCheckedOut ? 'Recorded' : 'Active') : 'Upcoming',
             color: t.amber,
             isCurrent: hasCheckedIn && !hasCheckedOut,
           ),
           const SizedBox(height: 6),
 
-          // Lunch Break: 1:00 PM - 2:00 PM (Auto Break)
+          // Lunch Break: 1:00 PM - 2:00 PM
           _buildShiftTimelineItem(
             t: t,
             icon: Icons.restaurant_rounded,
-            title: 'Lunch Break (Auto)',
+            title: 'Lunch Break',
             timing: '1:00 PM – 2:00 PM',
-            duration: '1 hr auto-break',
-            status: hasCheckedOut ? 'Deducted' : (hasCheckedIn ? 'Scheduled' : '1 hr'),
+            duration: breakMins > 0 ? '${Fmt.minutes(breakMins)} taken' : '1 hr auto-break',
+            status: breakMins > 0 ? '${Fmt.minutes(breakMins)} Break' : (hasCheckedOut ? 'Deducted' : '1 hr'),
             color: t.muted,
             isCurrent: false,
             isBreak: true,
@@ -393,10 +400,61 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
             title: 'Afternoon Shift',
             timing: '2:00 PM – 7:00 PM',
             duration: '5 hrs',
-            status: hasCheckedOut ? 'Done' : (hasCheckedIn ? 'In Progress' : 'Upcoming'),
+            status: hasCheckedOut ? 'Recorded' : (hasCheckedIn ? 'In Progress' : 'Upcoming'),
             color: t.accent,
             isCurrent: hasCheckedIn && !hasCheckedOut,
           ),
+
+          // Multiple Sessions breakdown if employee punched in/out multiple times
+          if (sessionsList.length > 1) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: t.pillTrack,
+                borderRadius: BorderRadius.circular(t.radiusTile),
+                border: Border.all(color: t.divider),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Today\'s Sessions (${sessionsList.length})', style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.ink)),
+                      if (breakMins > 0)
+                        Text('Break: ${Fmt.minutes(breakMins)}', style: t.text.caption(weight: FontWeight.w600).copyWith(color: t.amber)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  for (var i = 0; i < sessionsList.length; i++) ...[
+                    Builder(builder: (context) {
+                      final s = sessionsList[i];
+                      final sIn = jsonMap(s['checkIn'])['at'] as String?;
+                      final sOut = jsonMap(s['checkOut'])['at'] as String?;
+                      final sDur = (s['durationMinutes'] as num? ?? 0).toInt();
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Session ${i + 1}: ${sIn != null ? Fmt.time(sIn) : "—"} – ${sOut != null ? Fmt.time(sOut) : "(Active)"}',
+                              style: t.text.caption().copyWith(color: sOut == null ? t.accent : t.ink, fontSize: 11),
+                            ),
+                            Text(
+                              sOut != null ? Fmt.minutes(sDur) : 'In Progress',
+                              style: t.text.caption(weight: FontWeight.w600).copyWith(color: sOut == null ? t.accent : t.muted, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ],
+              ),
+            ),
+          ],
 
           if (hasCheckedIn || hasCheckedOut) ...[
             const SizedBox(height: 12),
@@ -408,7 +466,7 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Check In', style: t.text.caption(weight: FontWeight.w500).copyWith(color: t.muted)),
+                      Text('First Check In', style: t.text.caption(weight: FontWeight.w500).copyWith(color: t.muted)),
                       const SizedBox(height: 2),
                       Text(
                         hasCheckedIn ? Fmt.time(inTime) : '—',
@@ -437,10 +495,10 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Check Out', style: t.text.caption(weight: FontWeight.w500).copyWith(color: t.muted)),
+                      Text('Latest Check Out', style: t.text.caption(weight: FontWeight.w500).copyWith(color: t.muted)),
                       const SizedBox(height: 2),
                       Text(
-                        hasCheckedOut ? Fmt.time(outTime) : (hasCheckedIn ? 'Pending' : '—'),
+                        hasCheckedOut ? Fmt.time(outTime) : (hasCheckedIn ? 'In Progress' : '—'),
                         style: t.text.caption(weight: FontWeight.w700).copyWith(color: hasCheckedOut ? t.ink : t.muted),
                       ),
                       if (outLat != null && outLng != null) ...[
@@ -473,7 +531,7 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                           Fmt.minutes(workedMins),
                           style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.accent),
                         ),
-                        Text('net work', style: t.text.caption().copyWith(fontSize: 9, color: t.muted)),
+                        Text(breakMins > 0 ? '${Fmt.minutes(breakMins)} break' : 'net work', style: t.text.caption().copyWith(fontSize: 9, color: t.muted)),
                       ],
                     ),
                   ),
@@ -573,6 +631,8 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
               (rec['dayCount'] as num?)?.toDouble() ??
               (isCheckedOut ? (rec['status'] == 'half_day' ? 0.5 : 1.0) : (isCheckedIn ? 0.5 : 0.0));
 
+          final hasStarted = rec['checkIn'] != null;
+
           final label = switch (_phase) {
             _Phase.locating => 'Getting your location…',
             _Phase.selfie => 'Waiting for photo…',
@@ -580,17 +640,17 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
             _Phase.idle => switch (state) {
                 'not_checked_in' => 'Check In',
                 'checked_in' => 'Check Out',
-                _ => 'Attendance Complete',
+                _ => 'Check In (Resume Work)',
               },
           };
 
           final buttonIcon = switch (state) {
             'not_checked_in' => Icons.login_rounded,
             'checked_in' => Icons.logout_rounded,
-            _ => Icons.task_alt_rounded,
+            _ => Icons.login_rounded,
           };
 
-          final isCheckInAction = state == 'not_checked_in';
+          final isCheckInAction = state != 'checked_in';
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -601,11 +661,13 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                 subtitle: '${Fmt.date(today['workDate'])}${shift.isNotEmpty ? ' · ${shift['name']} (${shift['startTime']}–${shift['endTime']})' : ' · Shift: 10:00 AM – 7:00 PM'}',
                 trailing: StatusChip(
                   isCheckedOut
-                      ? (dayCount >= 1.0 ? 'present' : 'half_day')
+                      ? (dayCount >= 1.0 ? 'present' : (dayCount >= 0.5 ? 'half_day' : 'pending'))
                       : (isCheckedIn ? 'present' : 'pending'),
-                  label: isCheckedOut
-                      ? (dayCount >= 1.0 ? '1.0 Full Day' : '0.5 Half Day')
-                      : (isCheckedIn ? 'Checked In' : 'Not Checked In'),
+                  label: isCheckedIn
+                      ? 'Checked In · Active'
+                      : (hasStarted
+                          ? (dayCount >= 1.0 ? '1.0 Full Day' : (dayCount >= 0.5 ? '0.5 Half Day' : 'Paused / On Break'))
+                          : 'Not Checked In'),
                 ),
               ),
               if (today['holiday'] != null)
@@ -632,17 +694,17 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
               const SizedBox(height: 12),
 
               // Primary Punch Action Button (Check In or Check Out)
-              if (!isCheckedOut)
-                NButton(
-                  label: label,
-                  icon: buttonIcon,
-                  variant: NButtonVariant.accent,
-                  busy: busy,
-                  onPressed: () => _punch(today),
-                ),
+              NButton(
+                label: label,
+                icon: buttonIcon,
+                variant: isCheckedIn ? NButtonVariant.secondary : NButtonVariant.accent,
+                busy: busy,
+                onPressed: () => _punch(today),
+              ),
 
-              // Day Complete Banner
-              if (isCheckedOut) ...[
+              // Day Summary Banner when currently checked out
+              if (isCheckedOut && hasStarted) ...[
+                const SizedBox(height: 12),
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -659,11 +721,11 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '${dayCount >= 1.0 ? "1.0 Full Day" : "0.5 Half Day"} Attendance Counted',
+                              '${dayCount >= 1.0 ? "1.0 Full Day" : (dayCount >= 0.5 ? "0.5 Half Day" : "In Progress")} (${Fmt.minutes(rec['workedMinutes'] ?? 0)} worked)',
                               style: t.text.body(weight: FontWeight.w700).copyWith(color: dayCount >= 1.0 ? t.green : t.amber),
                             ),
                             Text(
-                              'Checked in at ${rec['checkIn']?['at'] != null ? Fmt.time(rec['checkIn']['at']) : '—'} · Checked out at ${rec['checkOut']?['at'] != null ? Fmt.time(rec['checkOut']['at']) : '—'} (${Fmt.minutes(rec['workedMinutes'] ?? 0)} worked, 1h lunch deducted).',
+                              'Latest check-out at ${rec['checkOut']?['at'] != null ? Fmt.time(rec['checkOut']['at']) : '—'}.${(rec['breakMinutes'] as num? ?? 0) > 0 ? ' Break: ${Fmt.minutes(rec['breakMinutes'])}.' : ''} Tap "Check In (Resume Work)" whenever you return.',
                               style: t.text.caption().copyWith(color: t.muted),
                             ),
                           ],
