@@ -11,7 +11,6 @@ import '../../app/session.dart';
 import '../../data/api.dart';
 import '../../platform/bridge.dart';
 import '../../widgets/async_view.dart';
-import '../../widgets/brand.dart';
 import '../../widgets/format.dart';
 
 /// Centered sign-in card on the page background with modern ambient lighting.
@@ -76,54 +75,6 @@ class AuthFrame extends StatelessWidget {
                     children: [
                       NEntrance(
                         order: 0,
-                        child: Column(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: t.card.withValues(alpha: isDark ? 0.45 : 0.8),
-                                border: Border.all(
-                                  color: t.accent.withValues(alpha: isDark ? 0.35 : 0.2),
-                                  width: 1.5,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: t.accent.withValues(alpha: isDark ? 0.28 : 0.14),
-                                    blurRadius: 22,
-                                    spreadRadius: 2,
-                                  ),
-                                ],
-                              ),
-                              child: const SignalMark(size: 44),
-                            ),
-                            const SizedBox(height: 12),
-                            const SignalWordmark(size: 26),
-                            const SizedBox(height: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3.5),
-                              decoration: BoxDecoration(
-                                color: t.accent.withValues(alpha: isDark ? 0.18 : 0.10),
-                                borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                                border: Border.all(
-                                  color: t.accent.withValues(alpha: isDark ? 0.3 : 0.2),
-                                ),
-                              ),
-                              child: Text(
-                                'PEOPLE • WORK • TIME • OPERATIONS',
-                                style: t.text.caption(weight: FontWeight.w700).copyWith(
-                                      color: t.accent,
-                                      letterSpacing: 1.2,
-                                      fontSize: 10.5,
-                                    ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 22),
-                      NEntrance(
-                        order: 1,
                         child: Container(
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(22),
@@ -152,7 +103,7 @@ class AuthFrame extends StatelessWidget {
                       ),
                       const SizedBox(height: 18),
                       NEntrance(
-                        order: 2,
+                        order: 1,
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
