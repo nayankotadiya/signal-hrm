@@ -186,14 +186,21 @@ class ApiClient {
     return _refreshing ??= () async {
       try {
         final savedRt = _platform.readLocal('shrm_rt');
+        if (savedRt == null || savedRt.isEmpty) {
+          return false;
+        }
         final req = http.Request('POST', uri('/auth/refresh'))
           ..headers.addAll(_headers()..remove('authorization'))
-          ..body = jsonEncode({if (savedRt != null && savedRt.isNotEmpty) 'refreshToken': savedRt});
-        final res = await http.Response.fromStream(await _client.send(req).timeout(const Duration(seconds: 15)));
+          ..body = jsonEncode({'refreshToken': savedRt});
+        final res = await http.Response.fromStream(await _client.send(req).timeout(const Duration(seconds: 30)));
         if (res.statusCode != 200) {
-          _platform.writeLocal('shrm_rt', null);
-          setToken(null);
-          onSession?.call(null);
+          // Only clear stored session on definitive auth rejection (401 / 403).
+          // Temporary server wakeup / cold start (5xx) must NOT wipe the user's session!
+          if (res.statusCode == 401 || res.statusCode == 403) {
+            _platform.writeLocal('shrm_rt', null);
+            setToken(null);
+            onSession?.call(null);
+          }
           return false;
         }
         final j = jsonDecode(utf8.decode(res.bodyBytes)) as Json;

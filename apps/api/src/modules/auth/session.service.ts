@@ -77,7 +77,17 @@ export class SessionService {
     if (!sid || !secret || !Types.ObjectId.isValid(sid)) throw this.unauth();
     const session = await this.sessions.findById(sid).lean<any>();
     if (!session || session.revokedAt || session.expiresAt < new Date()) throw this.unauth();
-    if (session.refreshHash !== sha256(secret)) {
+    const hash = sha256(secret);
+    if (session.refreshHash !== hash) {
+      // Grace period (90 seconds): If the client presents the previous token that was just rotated
+      // (e.g. app reload, fast retries, cross-tab, network hiccup), don't revoke! Return current access.
+      const lastUsed = session.lastUsedAt ? new Date(session.lastUsedAt).getTime() : 0;
+      if (session.previousRefreshHash === hash && Date.now() - lastUsed < 90_000) {
+        const user = await this.users.findById(session.userId).lean<any>();
+        if (!user) throw this.unauth();
+        return { ...(await this.accessFor(user, sid)), refreshToken: presented!, sessionId: sid, user };
+      }
+
       // Reuse of a rotated token: someone else may hold it. Revoke and alert.
       await this.sessions.updateOne({ _id: sid }, { $set: { revokedAt: new Date(), revokedReason: 'refresh_reuse' } });
       await this.alerts.create({
@@ -93,10 +103,10 @@ export class SessionService {
     const user = await this.users.findById(session.userId).lean<any>();
     if (!user) throw this.unauth();
     const next = randomToken(32);
-    // Conditional update: two parallel refreshes cannot both succeed.
+    // Conditional update: preserve previousRefreshHash for rotation grace period.
     const r = await this.sessions.updateOne(
       { _id: sid, refreshHash: session.refreshHash },
-      { $set: { refreshHash: sha256(next), lastUsedAt: new Date(), ip: client.ip } },
+      { $set: { previousRefreshHash: session.refreshHash, refreshHash: sha256(next), lastUsedAt: new Date(), ip: client.ip } },
     );
     if (r.modifiedCount !== 1) throw this.unauth();
     return { ...(await this.accessFor(user, sid)), refreshToken: `${sid}.${next}`, sessionId: sid, user };
@@ -121,12 +131,13 @@ export class SessionService {
   }
 
   setCookie(res: Response, refreshToken: string, days?: number): void {
+    const isProd = this.env.APP_ENV === 'production';
     res.cookie(REFRESH_COOKIE, refreshToken, {
       httpOnly: true,
-      secure: this.env.COOKIE_SECURE,
-      sameSite: this.env.COOKIE_SAME_SITE,
+      secure: isProd || this.env.COOKIE_SECURE,
+      sameSite: isProd ? 'none' : this.env.COOKIE_SAME_SITE,
       path: `/${this.env.API_PREFIX}/v1/auth`,
-      ...(days ? { maxAge: days * 86400_000 } : {}),
+      maxAge: (days ?? 30) * 86400_000,
     });
   }
 

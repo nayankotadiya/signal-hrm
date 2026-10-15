@@ -72,8 +72,12 @@ export class GoogleDriveStorageProvider implements IStorageProvider {
       const chunks: Buffer[] = [];
       (input.body as Readable).on('data', (c) => chunks.push(Buffer.from(c))).on('end', () => res(Buffer.concat(chunks))).on('error', rej);
     });
-    const org = await this.folder(input.organizationId, this.rootFolderId);
-    const parent = await this.folder(input.folder.replace(/[^\w-]/g, '_') || 'files', org);
+    // When a dedicated root folder is configured, place files directly in that folder.
+    let parent = this.rootFolderId;
+    if (!parent) {
+      const org = await this.folder(input.organizationId);
+      parent = await this.folder(input.folder.replace(/[^\w-]/g, '_') || 'files', org);
+    }
     try {
       const res = await this.client.files.create({
         requestBody: { name: input.fileName.slice(0, 200), parents: [parent] },

@@ -24,9 +24,10 @@ class CompositeStorageProvider implements IStorageProvider {
   async put(input: PutFileInput): Promise<StoredFileRef> {
     try {
       return await this.primary.put(input);
-    } catch (err) {
+    } catch (err: any) {
       // Fallback: If primary storage fails (e.g. read-only disk on cloud or not configured), use MongoDB GridFS
       if (this.primary !== this.mongo) {
+        console.warn(`[Storage] Primary storage '${this.primary.name}' put failed (${err?.message || err}). Falling back to MongoDB GridFS.`);
         return await this.mongo.put(input);
       }
       throw err;

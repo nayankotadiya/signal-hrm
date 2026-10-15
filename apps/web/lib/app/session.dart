@@ -95,10 +95,20 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<void> restore() async {
+    final savedRt = bridge.readLocal('shrm_rt');
+    if (savedRt == null || savedRt.isEmpty) {
+      if (_status == SessionStatus.unknown) {
+        _status = SessionStatus.signedOut;
+        notifyListeners();
+      }
+      return;
+    }
     final ok = await api.refresh();
     if (!ok && _status == SessionStatus.unknown) {
-      _status = SessionStatus.signedOut;
-      notifyListeners();
+      if (bridge.readLocal('shrm_rt') == null) {
+        _status = SessionStatus.signedOut;
+        notifyListeners();
+      }
     }
   }
 

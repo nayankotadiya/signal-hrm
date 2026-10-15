@@ -68,7 +68,7 @@ export class AuthController {
   @HttpCode(200)
   async verifyOtp(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const b = parse(verify, body);
-    return this.signedIn(res, await this.auth.verifyOtp(b.identifier, b.code, client(req, b.deviceName)), req.header('x-token-in-body') === '1', b.rememberMe ?? true);
+    return this.signedIn(res, await this.auth.verifyOtp(b.identifier, b.code, client(req, b.deviceName)), true, b.rememberMe ?? true);
   }
 
   @Public()
@@ -77,7 +77,7 @@ export class AuthController {
   @HttpCode(200)
   async google(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const b = parse(idToken, body);
-    return this.signedIn(res, await this.auth.google(b.idToken, client(req, b.deviceName)));
+    return this.signedIn(res, await this.auth.google(b.idToken, client(req, b.deviceName)), true);
   }
 
   @Public()
@@ -86,7 +86,7 @@ export class AuthController {
   @HttpCode(200)
   async apple(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const b = parse(idToken, body);
-    return this.signedIn(res, await this.auth.apple(b.idToken, client(req, b.deviceName)));
+    return this.signedIn(res, await this.auth.apple(b.idToken, client(req, b.deviceName)), true);
   }
 
   @Public()
@@ -95,7 +95,7 @@ export class AuthController {
   @HttpCode(200)
   async password(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const b = parse(password, body);
-    return this.signedIn(res, await this.auth.password(b.identifier, b.password, client(req)), false, b.rememberMe ?? true);
+    return this.signedIn(res, await this.auth.password(b.identifier, b.password, client(req)), true, b.rememberMe ?? true);
   }
 
   @Public()
@@ -110,7 +110,7 @@ export class AuthController {
   @HttpCode(200)
   async acceptInvitation(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const b = parse(accept, body);
-    return this.signedIn(res, await this.auth.acceptInvitation(b.token, b.code, client(req)));
+    return this.signedIn(res, await this.auth.acceptInvitation(b.token, b.code, client(req)), true);
   }
 
   @Public()
@@ -119,7 +119,7 @@ export class AuthController {
   @HttpCode(200)
   async recover(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const b = parse(recover, body);
-    return this.signedIn(res, await this.auth.recover(b.identifier, b.recoveryCode, client(req)));
+    return this.signedIn(res, await this.auth.recover(b.identifier, b.recoveryCode, client(req)), true);
   }
 
   @Public()
@@ -128,7 +128,7 @@ export class AuthController {
   @HttpCode(200)
   async refresh(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const b = parse(refresh, body);
-    const presented = (req as any).cookies?.[REFRESH_COOKIE] ?? cookieFrom(req, REFRESH_COOKIE) ?? b.refreshToken;
+    const presented = b.refreshToken ?? (req as any).cookies?.[REFRESH_COOKIE] ?? cookieFrom(req, REFRESH_COOKIE);
     try {
       const s = await this.sessions.refresh(presented, client(req));
       return this.signedIn(res, s, true, true);

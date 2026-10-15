@@ -116,6 +116,7 @@ export const SessionSchema = orgScoped(
     {
       userId: { type: ObjectId, required: true, index: true },
       refreshHash: { type: String, required: true },
+      previousRefreshHash: String,
       /** Rotation family: reuse of an old refresh token revokes the whole family. */
       family: { type: String, required: true, index: true },
       deviceId: String,
