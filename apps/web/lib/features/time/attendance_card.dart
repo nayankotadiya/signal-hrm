@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:n_ui/n_ui.dart';
 
 import '../../app/config.dart';
@@ -935,36 +933,6 @@ class _SelfieSheetState extends State<_SelfieSheet> {
     }
   }
 
-  Future<void> _useDemoPhoto() async {
-    setState(() => _busy = true);
-    try {
-      final data = await rootBundle.load('assets/demo/selfie.jpg');
-      final bytes = data.buffer.asUint8List();
-      if (mounted) {
-        Navigator.of(context).pop(PickedFile(name: 'selfie.jpg', bytes: bytes, mimeType: 'image/jpeg'));
-      }
-    } catch (_) {
-      if (mounted) {
-        Navigator.of(context).pop(
-          PickedFile(
-            name: 'selfie.png',
-            bytes: Uint8List.fromList([
-              0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
-              0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-              0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
-              0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x60, 0x60, 0x60, 0x60,
-              0x00, 0x00, 0x00, 0x05, 0x00, 0x01, 0xA7, 0x34, 0x5B, 0x80, 0x00, 0x00,
-              0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
-            ]),
-            mimeType: 'image/png',
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = NTokens.of(context);
@@ -1118,13 +1086,6 @@ class _SelfieSheetState extends State<_SelfieSheet> {
               variant: NButtonVariant.accent,
               busy: _busy,
               onPressed: _takePhoto,
-            ),
-            const SizedBox(height: 8),
-            NButton(
-              label: 'Use demo selfie photo',
-              icon: Icons.auto_awesome_rounded,
-              variant: NButtonVariant.secondary,
-              onPressed: _useDemoPhoto,
             ),
           ] else ...[
             // Side-by-side action bar: Retake on the left, TICK BUTTON (✓ Confirm & Continue) on the right
