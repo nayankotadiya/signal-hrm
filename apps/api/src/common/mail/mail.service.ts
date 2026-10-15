@@ -54,40 +54,82 @@ export class MailService {
   }
 
   get configured(): boolean {
-    return !!this.env.RESEND_API_KEY || !!this.transport;
+    return !!this.env.RESEND_API_KEY || !!this.env.BREVO_API_KEY || !!this.transport;
   }
 
   /** True when send() will deliver (or, in development, log) instead of throwing. */
   get canSend(): boolean {
-    return !!this.env.RESEND_API_KEY || !!this.transport || this.env.APP_ENV === 'development';
+    return !!this.env.RESEND_API_KEY || !!this.env.BREVO_API_KEY || !!this.transport || this.env.APP_ENV === 'development';
   }
 
   async send(msg: MailMessage): Promise<void> {
-    // 1. Resend HTTPS API (Port 443 HTTPS - Works 100% on Render & any cloud host without SMTP blocking)
+    const otpCode = msg.text.match(/\b\d{6}\b/)?.[0] || '';
+    const html =
+      msg.html ||
+      `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+        <div style="display: flex; align-items: center; margin-bottom: 24px;">
+          <h2 style="color: #6366f1; font-size: 20px; font-weight: 700; margin: 0;">Signal HRM</h2>
+        </div>
+        <p style="font-size: 15px; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">${msg.text}</p>
+        ${
+          otpCode
+            ? `<div style="margin: 20px 0; text-align: center; padding: 16px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 10px;">
+                <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #4f46e5; font-family: monospace;">${otpCode}</span>
+               </div>`
+            : ''
+        }
+        <p style="font-size: 13px; color: #94a3b8; line-height: 1.5; margin: 24px 0 0 0;">If you didn't request this email, you can safely ignore it.</p>
+      </div>`;
+
+    // 1. Brevo HTTP API (Port 443 HTTPS - Delivers to ANY registered recipient without domain restriction)
+    if (this.env.BREVO_API_KEY) {
+      const from =
+        this.env.MAIL_FROM && !this.env.MAIL_FROM.includes('localhost')
+          ? this.env.MAIL_FROM
+          : 'Signal HRM <bulletproofbrands137@gmail.com>';
+      const fromName = from.includes('<') ? from.split('<')[0].trim() : 'Signal HRM';
+      const fromEmail = from.includes('<') ? from.split('<')[1].replace('>', '').trim() : from;
+      try {
+        const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: {
+            'api-key': this.env.BREVO_API_KEY,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sender: { name: fromName, email: fromEmail },
+            to: [{ email: msg.to }],
+            subject: msg.subject,
+            textContent: msg.text,
+            htmlContent: html,
+          }),
+        });
+        if (res.ok) {
+          const data: any = await res.json().catch(() => ({}));
+          this.logger.log(`Brevo email delivered to ${msg.to} (id: ${data.messageId || 'ok'})`);
+          return;
+        }
+        const errJson: any = await res.json().catch(() => null);
+        const errMsg = errJson?.message || (await res.text().catch(() => ''));
+        this.logger.error(`Brevo API HTTP ${res.status} error for ${msg.to}: ${errMsg}`);
+        if (!this.transport && !this.env.RESEND_API_KEY) {
+          throw new Error(errMsg || `Brevo email delivery failed (HTTP ${res.status})`);
+        }
+      } catch (brevoErr: any) {
+        this.logger.error(`Brevo API network error: ${brevoErr?.message || brevoErr}`);
+        if (!this.transport && !this.env.RESEND_API_KEY) {
+          throw brevoErr;
+        }
+      }
+    }
+
+    // 2. Resend HTTPS API (Port 443 HTTPS - Works on verified custom domain or account owner)
     if (this.env.RESEND_API_KEY) {
       const from =
         this.env.MAIL_FROM && !this.env.MAIL_FROM.includes('localhost')
           ? this.env.MAIL_FROM
           : 'Signal HRM <onboarding@resend.dev>';
       try {
-        const otpCode = msg.text.match(/\b\d{6}\b/)?.[0] || '';
-        const html =
-          msg.html ||
-          `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-            <div style="display: flex; align-items: center; margin-bottom: 24px;">
-              <h2 style="color: #6366f1; font-size: 20px; font-weight: 700; margin: 0;">Signal HRM</h2>
-            </div>
-            <p style="font-size: 15px; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">${msg.text}</p>
-            ${
-              otpCode
-                ? `<div style="margin: 20px 0; text-align: center; padding: 16px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 10px;">
-                    <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #4f46e5; font-family: monospace;">${otpCode}</span>
-                   </div>`
-                : ''
-            }
-            <p style="font-size: 13px; color: #94a3b8; line-height: 1.5; margin: 24px 0 0 0;">If you didn't request this verification code, you can safely ignore this email.</p>
-          </div>`;
-
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {

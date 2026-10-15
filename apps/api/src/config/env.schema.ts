@@ -68,8 +68,9 @@ export const envSchema = z
     // Encryption at rest for integration tokens and other secrets (32-byte base64 key)
     ENCRYPTION_KEY: optionalString,
 
-    // Email (Resend HTTP API or nodemailer SMTP)
+    // Email (Resend HTTP API, Brevo HTTP API or nodemailer SMTP)
     RESEND_API_KEY: optionalString,
+    BREVO_API_KEY: optionalString,
     SMTP_HOST: optionalString,
     SMTP_PORT: z.coerce.number().int().positive().default(587),
     SMTP_USER: optionalString,
