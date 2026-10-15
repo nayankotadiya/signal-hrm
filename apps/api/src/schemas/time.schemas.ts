@@ -111,6 +111,7 @@ export const AttendanceSchema = orgScoped(
       overtimeMinutes: { type: Number, default: 0 },
       lateMinutes: { type: Number, default: 0 },
       earlyLeaveMinutes: { type: Number, default: 0 },
+      dayCount: { type: Number, default: 0 },
       status: { type: String, enum: ATTENDANCE_STATUSES, default: 'incomplete' },
       flags: [String], // suspicious-pattern flag ids for review (never auto-punitive)
       correctionRequestId: ObjectId,

@@ -116,6 +116,7 @@ export class AttendanceService implements OnModuleInit {
       timezone: org.timezone,
       record: serialize(record),
       state: !record?.checkIn ? 'not_checked_in' : !record.checkOut ? 'checked_in' : 'checked_out',
+      dayCount: record?.dayCount ?? (record?.checkOut ? (record?.status === 'half_day' ? 0.5 : 1.0) : (record?.checkIn ? 0.5 : 0.0)),
       shift: shift ? { ...serialize(shift), lengthMinutes: shiftLength(shift) } : null,
       location: location ? { id: String(location._id), name: location.name, latitude: location.latitude, longitude: location.longitude, radiusMeters: location.radiusMeters } : null,
       requirements: {
@@ -384,12 +385,14 @@ export class AttendanceService implements OnModuleInit {
   /** Worked, overtime, early-leave minutes and day status from server-validated timestamps. */
   totals(inAt: Date, outAt: Date, shift: any, org: any, lateMinutes: number, workDate: string): Record<string, unknown> {
     const gross = Math.max(0, Math.round((new Date(outAt).getTime() - new Date(inAt).getTime()) / 60_000));
-    const breakMinutes = shift && gross > 300 ? (shift.breakMinutes ?? 0) : 0;
+    // Automatic 1:00 PM to 2:00 PM lunch break (60 minutes):
+    // Deducted when the shift spans through lunch or gross duration is >= 4.5 hours (270 min)
+    const breakMinutes = gross >= 270 ? (shift?.breakMinutes ?? 60) : 0;
     const worked = Math.max(0, gross - breakMinutes);
     let overtime = 0;
     let early = 0;
     if (shift) {
-      const len = shiftLength(shift) - (shift.breakMinutes ?? 0);
+      const len = shiftLength(shift) - (shift.breakMinutes ?? 60);
       const threshold = shift.overtimeAfterMinutes || len;
       overtime = Math.max(0, worked - threshold);
       const end = zonedTimeToUtc(toMinutes(shift.endTime) <= toMinutes(shift.startTime) ? addDays(workDate, 1) : workDate, shift.endTime, org.timezone);
@@ -397,8 +400,22 @@ export class AttendanceService implements OnModuleInit {
     }
     const a = org.settings?.attendance ?? {};
     let status = lateMinutes > 0 ? 'late' : 'present';
-    if (worked < (a.halfDayMinutes ?? 240)) status = 'half_day';
-    return { breakMinutes, workedMinutes: worked, overtimeMinutes: overtime, earlyLeaveMinutes: early, status };
+    let dayCount = 1.0;
+    // Shift: 10:00 AM - 1:00 PM (Morning 3h = 180m), 1:00 PM - 2:00 PM Break (60m auto), 2:00 PM - 7:00 PM (Afternoon 5h = 300m).
+    // Total scheduled net work: 480m (8 hours).
+    // Full Day (1.0): >= 360 mins (6 hours net work, spanning both sessions).
+    // Half Day (0.5): >= 150 mins (2.5 hours, e.g. morning session 3h or afternoon session 5h).
+    if (worked >= 360) {
+      dayCount = 1.0;
+      status = lateMinutes > 0 ? 'late' : 'present';
+    } else if (worked >= 150) {
+      dayCount = 0.5;
+      status = 'half_day';
+    } else {
+      dayCount = 0.0;
+      status = 'incomplete';
+    }
+    return { breakMinutes, workedMinutes: worked, overtimeMinutes: overtime, earlyLeaveMinutes: early, status, dayCount };
   }
 
   // ------------------------------------------------------------------ queries

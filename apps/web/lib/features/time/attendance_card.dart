@@ -125,20 +125,14 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
 
   Future<void> _punch(Json today, {String? exceptionReason, bool remote = false}) async {
     final state = '${today['state']}';
-    final isCheckIn = state == 'not_checked_in' || state == 'on_break';
+    final isCheckIn = state == 'not_checked_in';
     final action = isCheckIn ? 'check-in' : 'check-out';
     final req = jsonMap(jsonMap(today['requirements'])[isCheckIn ? 'checkIn' : 'checkOut']);
     final needLocation = req['requireLocation'] != false;
     // Always enable selfie photo verification for attendance punches
     final needSelfie = req['requireSelfie'] != false;
 
-    final stepTitle = switch (state) {
-      'not_checked_in' => 'Step 1: Check In',
-      'checked_in' => 'Step 2: Break In',
-      'on_break' => 'Step 3: Break Out',
-      'session_2_active' => 'Step 4: Check Out',
-      _ => isCheckIn ? 'Check in' : 'Check out',
-    };
+    final stepTitle = isCheckIn ? 'Check-in photo' : 'Check-out photo';
 
     _attemptKey ??= newIdempotencyKey();
     setState(() => _problem = null);
@@ -212,13 +206,9 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
       final punch = jsonMap(rec[isCheckIn ? 'checkIn' : 'checkOut']);
       final punchTime = punch['at'] != null ? Fmt.time(punch['at']) : 'now';
 
-      final successMsg = switch (state) {
-        'not_checked_in' => 'Check in recorded at $punchTime.',
-        'checked_in' => 'Break in recorded at $punchTime. (0.5 day counted)',
-        'on_break' => 'Break out recorded at $punchTime. Welcome back!',
-        'session_2_active' => 'Check out recorded at $punchTime. 1.0 Full Attendance Day completed!',
-        _ => '${isCheckIn ? 'Checked in' : 'Checked out'} at $punchTime.',
-      };
+      final successMsg = isCheckIn
+          ? 'Check-in recorded at $punchTime. Morning shift active (10:00 AM – 1:00 PM).'
+          : 'Check-out recorded at $punchTime. Day attendance completed!';
 
       NToast.of(context).show(r['exception'] == true
           ? 'Recorded at $punchTime. Your exception was sent for approval.'
@@ -309,178 +299,29 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     );
   }
 
-  Widget _buildPunchStepper(NTokens t, int currentStep, Map<String, dynamic> rec, bool isMobile) {
-    final session1 = jsonMap(rec['session1']);
-    final session2 = jsonMap(rec['session2']);
-    final s1CheckIn = jsonMap(session1['checkIn']);
-    final s1CheckOut = jsonMap(session1['checkOut']);
-    final s2CheckIn = jsonMap(session2['checkIn']);
-    final s2CheckOut = jsonMap(session2['checkOut']);
-    final recCheckIn = jsonMap(rec['checkIn']);
-    final recCheckOut = jsonMap(rec['checkOut']);
+  Widget _buildShiftSchedule(NTokens t, String state, Map<String, dynamic> rec, double dayCount, bool isMobile) {
+    final checkIn = jsonMap(rec['checkIn']);
+    final checkOut = jsonMap(rec['checkOut']);
+    final inTime = checkIn['at'] as String?;
+    final outTime = checkOut['at'] as String?;
+    final inLat = checkIn['latitude'];
+    final inLng = checkIn['longitude'];
+    final outLat = checkOut['latitude'];
+    final outLng = checkOut['longitude'];
+    final workedMins = (rec['workedMinutes'] as num? ?? 0).toInt();
 
-    final s1In = s1CheckIn['at'] as String? ?? recCheckIn['at'] as String?;
-    final s1Out = s1CheckOut['at'] as String?;
-    final s2In = s2CheckIn['at'] as String?;
-    final s2Out = s2CheckOut['at'] as String? ?? (currentStep == 4 ? recCheckOut['at'] as String? : null);
+    final hasCheckedIn = inTime != null;
+    final hasCheckedOut = outTime != null;
 
-    final steps = [
-      (title: '1. Check In', time: s1In != null ? Fmt.time(s1In) : null, icon: Icons.login_rounded),
-      (title: '2. Break In', time: s1Out != null ? Fmt.time(s1Out) : null, icon: Icons.coffee_rounded),
-      (title: '3. Break Out', time: s2In != null ? Fmt.time(s2In) : null, icon: Icons.play_circle_outline_rounded),
-      (title: '4. Check Out', time: s2Out != null ? Fmt.time(s2Out) : null, icon: Icons.logout_rounded),
-    ];
+    final badgeLabel = hasCheckedOut
+        ? (dayCount >= 1.0 ? '1.0 Full Day' : '0.5 Half Day')
+        : (hasCheckedIn ? 'Checked In' : 'Not Checked In');
+    final badgeColor = hasCheckedOut
+        ? (dayCount >= 1.0 ? t.green : t.amber)
+        : (hasCheckedIn ? t.accent : t.muted);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: t.pillTrack,
-        borderRadius: BorderRadius.circular(t.radiusCard),
-        border: Border.all(color: t.cardBorder),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              Text(
-                'Punches (2 In + 2 Out = 1 Day)',
-                style: t.text.caption(weight: FontWeight.w600).copyWith(color: t.ink),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: currentStep == 4
-                      ? t.green.withValues(alpha: t.isDark ? 0.22 : 0.16)
-                      : (currentStep >= 2
-                          ? t.amber.withValues(alpha: t.isDark ? 0.22 : 0.16)
-                          : t.accent.withValues(alpha: t.isDark ? 0.22 : 0.16)),
-                  borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                ),
-                child: Text(
-                  currentStep == 4
-                      ? '1.0 Full Day'
-                      : (currentStep >= 2 ? '0.5 Half Day' : '0.0 Day'),
-                  style: t.text.caption(weight: FontWeight.w700).copyWith(
-                        color: currentStep == 4
-                            ? t.green
-                            : (currentStep >= 2 ? t.amber : t.accent),
-                      ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              for (var i = 0; i < steps.length; i++) ...[
-                Expanded(
-                  child: Column(
-                    children: [
-                      Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: i < currentStep
-                              ? t.green
-                              : (i == currentStep ? t.accent : t.card),
-                          border: Border.all(
-                            color: i == currentStep ? t.focusRing : t.cardBorder,
-                            width: i == currentStep ? 2 : 1,
-                          ),
-                        ),
-                        child: Center(
-                          child: Icon(
-                            i < currentStep
-                                ? Icons.check_rounded
-                                : steps[i].icon,
-                            size: 14,
-                            color: i < currentStep
-                                ? Colors.white
-                                : (i == currentStep ? t.onAccent : t.muted),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          isMobile ? steps[i].title.replaceFirst(RegExp(r'^\d+\.\s*'), '') : steps[i].title,
-                          textAlign: TextAlign.center,
-                          style: t.text.caption(
-                            weight: i == currentStep ? FontWeight.w700 : (i < currentStep ? FontWeight.w600 : FontWeight.w400),
-                          ).copyWith(
-                            fontSize: isMobile ? 10 : 11,
-                            color: i == currentStep ? t.accent : (i < currentStep ? t.ink : t.muted),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          steps[i].time ?? (i == currentStep ? 'Next' : '—'),
-                          textAlign: TextAlign.center,
-                          style: t.text.caption(
-                            weight: steps[i].time != null ? FontWeight.w600 : FontWeight.w400,
-                          ).copyWith(
-                            fontSize: isMobile ? 9 : 10,
-                            color: steps[i].time != null
-                                ? t.green
-                                : (i == currentStep ? t.accent : t.muted),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (i < steps.length - 1)
-                  Container(
-                    width: 6,
-                    height: 2,
-                    margin: const EdgeInsets.only(bottom: 24),
-                    color: i < currentStep ? t.green : t.divider,
-                  ),
-              ],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSessionsBreakdown(NTokens t, Map<String, dynamic> rec, int step, double dayCount) {
-    final session1 = jsonMap(rec['session1']);
-    final session2 = jsonMap(rec['session2']);
-    final s1CheckIn = jsonMap(session1['checkIn']);
-    final s1CheckOut = jsonMap(session1['checkOut']);
-    final s2CheckIn = jsonMap(session2['checkIn']);
-    final s2CheckOut = jsonMap(session2['checkOut']);
-    final recCheckIn = jsonMap(rec['checkIn']);
-    final recCheckOut = jsonMap(rec['checkOut']);
-
-    final s1In = s1CheckIn['at'] as String? ?? recCheckIn['at'] as String?;
-    final s1Out = s1CheckOut['at'] as String?;
-    final s2In = s2CheckIn['at'] as String?;
-    final s2Out = s2CheckOut['at'] as String? ?? (step == 4 ? recCheckOut['at'] as String? : null);
-
-    final s1InLat = s1CheckIn['latitude'] ?? recCheckIn['latitude'];
-    final s1InLng = s1CheckIn['longitude'] ?? recCheckIn['longitude'];
-    final s2InLat = s2CheckIn['latitude'];
-    final s2InLng = s2CheckIn['longitude'];
-    final s2OutLat = s2CheckOut['latitude'] ?? recCheckOut['latitude'];
-    final s2OutLng = s2CheckOut['longitude'] ?? recCheckOut['longitude'];
-    final s2Lat = s2OutLat ?? s2InLat;
-    final s2Lng = s2OutLng ?? s2InLng;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: t.card,
@@ -490,212 +331,218 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 4,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Sessions & Work Duration', style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.ink)),
-              if ((rec['workedMinutes'] as num? ?? 0) > 0)
-                Text(
-                  'Total: ${Fmt.minutes(rec['workedMinutes'])}',
-                  style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.accent),
+              Row(
+                children: [
+                  Icon(Icons.schedule_rounded, size: 16, color: t.accent),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Shift Schedule',
+                    style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.ink),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: badgeColor.withValues(alpha: t.isDark ? 0.22 : 0.16),
+                  borderRadius: BorderRadius.circular(NTokens.radiusPill),
                 ),
+                child: Text(
+                  badgeLabel,
+                  style: t.text.caption(weight: FontWeight.w700).copyWith(color: badgeColor),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 8),
-          // Session 1
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: t.pillTrack,
-              borderRadius: BorderRadius.circular(t.radiusTile),
-              border: Border.all(color: t.divider),
-            ),
-            child: Row(
+          const SizedBox(height: 10),
+
+          // Morning Shift: 10:00 AM - 1:00 PM
+          _buildShiftTimelineItem(
+            t: t,
+            icon: Icons.wb_sunny_outlined,
+            title: 'Morning Shift',
+            timing: '10:00 AM – 1:00 PM',
+            duration: '3 hrs',
+            status: hasCheckedIn ? (hasCheckedOut ? 'Done' : 'Active') : 'Upcoming',
+            color: t.amber,
+            isCurrent: hasCheckedIn && !hasCheckedOut,
+          ),
+          const SizedBox(height: 6),
+
+          // Lunch Break: 1:00 PM - 2:00 PM (Auto Break)
+          _buildShiftTimelineItem(
+            t: t,
+            icon: Icons.restaurant_rounded,
+            title: 'Lunch Break (Auto)',
+            timing: '1:00 PM – 2:00 PM',
+            duration: '1 hr auto-break',
+            status: hasCheckedOut ? 'Deducted' : (hasCheckedIn ? 'Scheduled' : '1 hr'),
+            color: t.muted,
+            isCurrent: false,
+            isBreak: true,
+          ),
+          const SizedBox(height: 6),
+
+          // Afternoon Shift: 2:00 PM - 7:00 PM
+          _buildShiftTimelineItem(
+            t: t,
+            icon: Icons.wb_twilight_rounded,
+            title: 'Afternoon Shift',
+            timing: '2:00 PM – 7:00 PM',
+            duration: '5 hrs',
+            status: hasCheckedOut ? 'Done' : (hasCheckedIn ? 'In Progress' : 'Upcoming'),
+            color: t.accent,
+            isCurrent: hasCheckedIn && !hasCheckedOut,
+          ),
+
+          if (hasCheckedIn || hasCheckedOut) ...[
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 10),
+            Row(
               children: [
-                Icon(Icons.wb_sunny_outlined, size: 16, color: t.amber),
-                const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Session 1 (Morning)', style: t.text.caption(weight: FontWeight.w600).copyWith(color: t.ink)),
+                      Text('Check In', style: t.text.caption(weight: FontWeight.w500).copyWith(color: t.muted)),
+                      const SizedBox(height: 2),
                       Text(
-                        s1In != null
-                            ? 'Check In: ${Fmt.time(s1In)} ${s1Out != null ? '· Break In: ${Fmt.time(s1Out)}' : '· (Active)'}'
-                            : 'Not started',
-                        style: t.text.caption().copyWith(color: t.muted),
+                        hasCheckedIn ? Fmt.time(inTime) : '—',
+                        style: t.text.caption(weight: FontWeight.w700).copyWith(color: hasCheckedIn ? t.ink : t.muted),
                       ),
-                      if (s1InLat != null && s1InLng != null) ...[
-                        const SizedBox(height: 3),
+                      if (inLat != null && inLng != null) ...[
+                        const SizedBox(height: 2),
                         InkWell(
-                          onTap: () => bridge.openUrl('https://www.google.com/maps?q=$s1InLat,$s1InLng'),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.location_on_rounded, size: 12, color: t.accent),
-                              const SizedBox(width: 2),
-                              Text(
-                                'View on Google Maps',
-                                style: t.text.caption(weight: FontWeight.w600).copyWith(
-                                      color: t.accent,
-                                      fontSize: 10,
-                                      decoration: TextDecoration.underline,
-                                    ),
-                              ),
-                            ],
+                          onTap: () => bridge.openUrl('https://www.google.com/maps?q=$inLat,$inLng'),
+                          child: Text(
+                            'View GPS',
+                            style: t.text.caption(weight: FontWeight.w600).copyWith(
+                                  color: t.accent,
+                                  fontSize: 10,
+                                  decoration: TextDecoration.underline,
+                                ),
                           ),
                         ),
                       ],
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: step >= 2
-                        ? t.green.withValues(alpha: t.isDark ? 0.22 : 0.16)
-                        : (step >= 1 ? t.accent.withValues(alpha: t.isDark ? 0.22 : 0.16) : t.card),
-                    borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                  ),
-                  child: Text(
-                    step >= 2 ? '0.5 Day Done' : (step >= 1 ? 'In Progress' : 'Pending'),
-                    style: t.text.caption(weight: FontWeight.w600).copyWith(
-                          fontSize: 10,
-                          color: step >= 2 ? t.green : (step >= 1 ? t.accent : t.muted),
+                Container(width: 1, height: 32, color: t.divider),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Check Out', style: t.text.caption(weight: FontWeight.w500).copyWith(color: t.muted)),
+                      const SizedBox(height: 2),
+                      Text(
+                        hasCheckedOut ? Fmt.time(outTime) : (hasCheckedIn ? 'Pending' : '—'),
+                        style: t.text.caption(weight: FontWeight.w700).copyWith(color: hasCheckedOut ? t.ink : t.muted),
+                      ),
+                      if (outLat != null && outLng != null) ...[
+                        const SizedBox(height: 2),
+                        InkWell(
+                          onTap: () => bridge.openUrl('https://www.google.com/maps?q=$outLat,$outLng'),
+                          child: Text(
+                            'View GPS',
+                            style: t.text.caption(weight: FontWeight.w600).copyWith(
+                                  color: t.accent,
+                                  fontSize: 10,
+                                  decoration: TextDecoration.underline,
+                                ),
+                          ),
                         ),
+                      ],
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
-          if (step >= 2) ...[
-            const SizedBox(height: 6),
-            // Lunch break
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: t.pillTrack,
-                borderRadius: BorderRadius.circular(t.radiusTile),
-                border: Border.all(color: t.divider),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.coffee_rounded, size: 14, color: step == 2 ? t.amber : t.muted),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      step == 2
-                          ? 'Currently on Break (Break In recorded)'
-                          : (step > 2 ? 'Break completed (Break Out recorded)' : 'Break (Pending)'),
-                      style: t.text.caption(weight: FontWeight.w500).copyWith(color: step == 2 ? t.ink : t.muted),
-                    ),
-                  ),
-                  if (step == 2)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: t.amber.withValues(alpha: t.isDark ? 0.22 : 0.16),
-                        borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                      ),
-                      child: Text(
-                        'On Break',
-                        style: t.text.caption(weight: FontWeight.w600).copyWith(
-                              fontSize: 10,
-                              color: t.amber,
-                            ),
-                      ),
-                    )
-                  else if (step > 2)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: t.green.withValues(alpha: t.isDark ? 0.22 : 0.16),
-                        borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                      ),
-                      child: Text(
-                        'Break Out Done',
-                        style: t.text.caption(weight: FontWeight.w600).copyWith(
-                              fontSize: 10,
-                              color: t.green,
-                            ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-          if (step >= 2) ...[
-            const SizedBox(height: 6),
-            // Session 2
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: t.pillTrack,
-                borderRadius: BorderRadius.circular(t.radiusTile),
-                border: Border.all(color: t.divider),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.nights_stay_outlined, size: 16, color: t.accent),
-                  const SizedBox(width: 8),
+                if (workedMins > 0) ...[
+                  Container(width: 1, height: 32, color: t.divider),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Session 2 (Afternoon)', style: t.text.caption(weight: FontWeight.w600).copyWith(color: t.ink)),
+                        Text('Worked', style: t.text.caption(weight: FontWeight.w500).copyWith(color: t.muted)),
+                        const SizedBox(height: 2),
                         Text(
-                          s2In != null
-                              ? 'Break Out: ${Fmt.time(s2In)} ${s2Out != null ? '· Check Out: ${Fmt.time(s2Out)}' : '· (Active)'}'
-                              : 'Pending break return',
-                          style: t.text.caption().copyWith(color: t.muted),
+                          Fmt.minutes(workedMins),
+                          style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.accent),
                         ),
-                        if (s2Lat != null && s2Lng != null) ...[
-                          const SizedBox(height: 3),
-                          InkWell(
-                            onTap: () => bridge.openUrl('https://www.google.com/maps?q=$s2Lat,$s2Lng'),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.location_on_rounded, size: 12, color: t.accent),
-                                const SizedBox(width: 2),
-                                Text(
-                                  'View on Google Maps',
-                                  style: t.text.caption(weight: FontWeight.w600).copyWith(
-                                        color: t.accent,
-                                        fontSize: 10,
-                                        decoration: TextDecoration.underline,
-                                      ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+                        Text('net work', style: t.text.caption().copyWith(fontSize: 9, color: t.muted)),
                       ],
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: step == 4
-                          ? t.green.withValues(alpha: t.isDark ? 0.22 : 0.16)
-                          : (step == 3 ? t.accent.withValues(alpha: t.isDark ? 0.22 : 0.16) : t.card),
-                      borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                    ),
-                    child: Text(
-                      step == 4 ? '1.0 Full Day Done' : (step == 3 ? 'In Progress' : 'Pending'),
-                      style: t.text.caption(weight: FontWeight.w600).copyWith(
-                            fontSize: 10,
-                            color: step == 4 ? t.green : (step == 3 ? t.accent : t.muted),
-                          ),
-                    ),
-                  ),
                 ],
-              ),
+              ],
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildShiftTimelineItem({
+    required NTokens t,
+    required IconData icon,
+    required String title,
+    required String timing,
+    required String duration,
+    required String status,
+    required Color color,
+    required bool isCurrent,
+    bool isBreak = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: isBreak ? t.pillTrack.withValues(alpha: 0.6) : (isCurrent ? color.withValues(alpha: 0.08) : t.pillTrack),
+        borderRadius: BorderRadius.circular(t.radiusTile),
+        border: Border.all(
+          color: isCurrent ? color.withValues(alpha: 0.5) : t.divider,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(title, style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.ink)),
+                    const SizedBox(width: 6),
+                    Text('($duration)', style: t.text.caption().copyWith(fontSize: 10, color: t.muted)),
+                  ],
+                ),
+                const SizedBox(height: 1),
+                Text(timing, style: t.text.caption().copyWith(fontSize: 11, color: t.muted)),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: (status == 'Active' || status == 'In Progress' ? t.accent : (status == 'Done' || status == 'Completed' ? t.green : t.card))
+                  .withValues(alpha: t.isDark ? 0.22 : 0.16),
+              borderRadius: BorderRadius.circular(NTokens.radiusPill),
+            ),
+            child: Text(
+              status,
+              style: t.text.caption(weight: FontWeight.w600).copyWith(
+                    fontSize: 10,
+                    color: status == 'Active' || status == 'In Progress'
+                        ? t.accent
+                        : (status == 'Done' || status == 'Completed' ? t.green : t.muted),
+                  ),
+            ),
+          ),
         ],
       ),
     );
@@ -719,41 +566,31 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
           final loc = jsonMap(today['location']);
           final busy = _phase != _Phase.idle;
 
-          final step = (today['step'] as num?)?.toInt() ??
-              (state == 'not_checked_in'
-                  ? 0
-                  : (state == 'checked_in'
-                      ? 1
-                      : (state == 'on_break'
-                          ? 2
-                          : (state == 'session_2_active' ? 3 : 4))));
+          final isCheckedIn = state == 'checked_in';
+          final isCheckedOut = state == 'checked_out';
 
           final dayCount = (today['attendanceDayCount'] as num?)?.toDouble() ??
               (rec['dayCount'] as num?)?.toDouble() ??
-              (step == 4 ? 1.0 : (step >= 2 ? 0.5 : 0.0));
+              (isCheckedOut ? (rec['status'] == 'half_day' ? 0.5 : 1.0) : (isCheckedIn ? 0.5 : 0.0));
 
           final label = switch (_phase) {
             _Phase.locating => 'Getting your location…',
             _Phase.selfie => 'Waiting for photo…',
             _Phase.sending => 'Recording punch…',
             _Phase.idle => switch (state) {
-                'not_checked_in' => 'Check in',
-                'checked_in' => 'Break in',
-                'on_break' => 'Break out',
-                'session_2_active' => 'Check out',
+                'not_checked_in' => 'Check In',
+                'checked_in' => 'Check Out',
                 _ => 'Attendance Complete',
               },
           };
 
           final buttonIcon = switch (state) {
             'not_checked_in' => Icons.login_rounded,
-            'checked_in' => Icons.coffee_rounded,
-            'on_break' => Icons.play_circle_outline_rounded,
-            'session_2_active' => Icons.logout_rounded,
+            'checked_in' => Icons.logout_rounded,
             _ => Icons.task_alt_rounded,
           };
 
-          final isCheckInAction = state == 'not_checked_in' || state == 'on_break';
+          final isCheckInAction = state == 'not_checked_in';
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -761,19 +598,14 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
             children: [
               NCardTitle(
                 'Today\'s Attendance',
-                subtitle: '${Fmt.date(today['workDate'])}${shift.isNotEmpty ? ' · ${shift['name']} ${shift['startTime']}–${shift['endTime']}' : ' · General Shift'}',
+                subtitle: '${Fmt.date(today['workDate'])}${shift.isNotEmpty ? ' · ${shift['name']} (${shift['startTime']}–${shift['endTime']})' : ' · Shift: 10:00 AM – 7:00 PM'}',
                 trailing: StatusChip(
-                  step == 4
-                      ? 'present'
-                      : (step >= 2 ? 'half_day' : (state == 'not_checked_in' ? 'pending' : 'present')),
-                  label: switch (state) {
-                    'not_checked_in' => 'Not checked in',
-                    'checked_in' => 'Session 1 Active',
-                    'on_break' => 'On Break',
-                    'session_2_active' => 'Session 2 Active',
-                    'checked_out' => '1.0 Day Complete',
-                    _ => Fmt.label(state),
-                  },
+                  isCheckedOut
+                      ? (dayCount >= 1.0 ? 'present' : 'half_day')
+                      : (isCheckedIn ? 'present' : 'pending'),
+                  label: isCheckedOut
+                      ? (dayCount >= 1.0 ? '1.0 Full Day' : '0.5 Half Day')
+                      : (isCheckedIn ? 'Checked In' : 'Not Checked In'),
                 ),
               ),
               if (today['holiday'] != null)
@@ -786,11 +618,8 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                   child: NBanner(message: '$_queued punch waiting to sync from this device.', tone: NBannerTone.warning),
                 ),
 
-              // Visual Stepper for the 4 punches (2 in, 2 out)
-              _buildPunchStepper(t, step, rec, isMobile),
-
-              // Detailed Session Cards if started
-              if (step >= 1) _buildSessionsBreakdown(t, rec, step, dayCount),
+              // Shift Schedule & Punch Details
+              _buildShiftSchedule(t, state, rec, dayCount, isMobile),
 
               // Work location row
               if (!widget.compact)
@@ -802,8 +631,8 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
               if (_problem != null) _problemPanel(t, today),
               const SizedBox(height: 12),
 
-              // Primary Punch Action Button
-              if (step < 4)
+              // Primary Punch Action Button (Check In or Check Out)
+              if (!isCheckedOut)
                 NButton(
                   label: label,
                   icon: buttonIcon,
@@ -812,29 +641,29 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                   onPressed: () => _punch(today),
                 ),
 
-              // Day Complete Banner & Reset Button
-              if (step == 4) ...[
+              // Day Complete Banner
+              if (isCheckedOut) ...[
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: t.green.withValues(alpha: t.isDark ? 0.20 : 0.12),
+                    color: (dayCount >= 1.0 ? t.green : t.amber).withValues(alpha: t.isDark ? 0.20 : 0.12),
                     borderRadius: BorderRadius.circular(t.radiusCard),
-                    border: Border.all(color: t.green),
+                    border: Border.all(color: dayCount >= 1.0 ? t.green : t.amber),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.verified_rounded, color: t.green, size: 24),
+                      Icon(Icons.verified_rounded, color: dayCount >= 1.0 ? t.green : t.amber, size: 24),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '1.0 Full Attendance Day Counted',
-                              style: t.text.body(weight: FontWeight.w700).copyWith(color: t.green),
+                              '${dayCount >= 1.0 ? "1.0 Full Day" : "0.5 Half Day"} Attendance Counted',
+                              style: t.text.body(weight: FontWeight.w700).copyWith(color: dayCount >= 1.0 ? t.green : t.amber),
                             ),
                             Text(
-                              '2 Check-ins and 2 Check-outs completed successfully.',
+                              'Checked in at ${rec['checkIn']?['at'] != null ? Fmt.time(rec['checkIn']['at']) : '—'} · Checked out at ${rec['checkOut']?['at'] != null ? Fmt.time(rec['checkOut']['at']) : '—'} (${Fmt.minutes(rec['workedMinutes'] ?? 0)} worked, 1h lunch deducted).',
                               style: t.text.caption().copyWith(color: t.muted),
                             ),
                           ],
@@ -846,7 +675,7 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
               ],
 
               // Footer helper details
-              if (step < 4)
+              if (!isCheckedOut)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Row(
