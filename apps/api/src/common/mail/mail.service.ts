@@ -84,7 +84,7 @@ export class MailService {
     // 1. Brevo HTTP API (Port 443 HTTPS - Delivers to ANY registered recipient without domain restriction)
     if (this.env.BREVO_API_KEY) {
       const from =
-        this.env.MAIL_FROM && !this.env.MAIL_FROM.includes('localhost')
+        this.env.MAIL_FROM && !this.env.MAIL_FROM.includes('localhost') && !this.env.MAIL_FROM.includes('resend.dev')
           ? this.env.MAIL_FROM
           : 'Signal HRM <bulletproofbrands137@gmail.com>';
       const fromName = from.includes('<') ? from.split('<')[0].trim() : 'Signal HRM';
