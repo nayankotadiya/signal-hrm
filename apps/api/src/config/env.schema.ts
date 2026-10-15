@@ -68,7 +68,8 @@ export const envSchema = z
     // Encryption at rest for integration tokens and other secrets (32-byte base64 key)
     ENCRYPTION_KEY: optionalString,
 
-    // Email (nodemailer SMTP). Without SMTP_HOST, email is written to the server log in development only.
+    // Email (Resend HTTP API or nodemailer SMTP)
+    RESEND_API_KEY: optionalString,
     SMTP_HOST: optionalString,
     SMTP_PORT: z.coerce.number().int().positive().default(587),
     SMTP_USER: optionalString,

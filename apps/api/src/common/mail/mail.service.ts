@@ -54,21 +54,54 @@ export class MailService {
   }
 
   get configured(): boolean {
-    return !!this.transport;
+    return !!this.env.RESEND_API_KEY || !!this.transport;
   }
 
   /** True when send() will deliver (or, in development, log) instead of throwing. */
   get canSend(): boolean {
-    return !!this.transport || this.env.APP_ENV === 'development';
+    return !!this.env.RESEND_API_KEY || !!this.transport || this.env.APP_ENV === 'development';
   }
 
   async send(msg: MailMessage): Promise<void> {
+    // 1. Resend HTTPS API (Port 443 HTTPS - Works 100% on Render & any cloud host without SMTP blocking)
+    if (this.env.RESEND_API_KEY) {
+      const from =
+        this.env.MAIL_FROM && !this.env.MAIL_FROM.includes('localhost')
+          ? this.env.MAIL_FROM
+          : 'Signal HRM <onboarding@resend.dev>';
+      try {
+        const res = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.env.RESEND_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from,
+            to: [msg.to],
+            subject: msg.subject,
+            text: msg.text,
+            html: msg.html,
+          }),
+        });
+        if (res.ok) {
+          const data: any = await res.json().catch(() => ({}));
+          this.logger.log(`Resend email delivered to ${msg.to} (id: ${data.id || 'ok'})`);
+          return;
+        }
+        const errBody = await res.text().catch(() => '');
+        this.logger.error(`Resend API HTTP ${res.status} error for ${msg.to}: ${errBody}`);
+      } catch (resendErr: any) {
+        this.logger.error(`Resend API network error: ${resendErr?.message || resendErr}`);
+      }
+    }
+
     if (!this.transport) {
       if (this.env.APP_ENV === 'development') {
         this.logger.log(`(no SMTP) would email ${msg.to}: ${msg.subject}`);
         return;
       }
-      throw new Error('Email is not configured (SMTP_HOST or SMTP_USER).');
+      throw new Error('Email is not configured (RESEND_API_KEY, SMTP_HOST or SMTP_USER).');
     }
 
     const defaultFrom = this.env.SMTP_USER ? `Signal HRM <${this.env.SMTP_USER}>` : undefined;

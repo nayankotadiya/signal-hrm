@@ -47,6 +47,8 @@ services:
         value: "false"
       - key: PASSWORD_LOGIN
         value: "true"
+      - key: RESEND_API_KEY
+        sync: false
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
