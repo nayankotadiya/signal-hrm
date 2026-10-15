@@ -27,13 +27,11 @@ flutter pub get
 
 # Default API URL fallback if not set in Vercel environment variables
 API_URL="${API_BASE_URL:-https://signal-hrm-api.onrender.com/api}"
-GOOGLE_ID="${GOOGLE_CLIENT_ID:-496408398091-dtkgg1289q8uv2dqupahuiooc3c52ui2.apps.googleusercontent.com}"
 echo "==> Target API URL: $API_URL"
 
 flutter build web --release --no-web-resources-cdn \
   --dart-define=APP_ENV=production \
   --dart-define=API_BASE_URL="$API_URL" \
-  --dart-define=GOOGLE_CLIENT_ID="$GOOGLE_ID" \
   --dart-define=PASSWORD_LOGIN=true
 
 echo "=================================================="

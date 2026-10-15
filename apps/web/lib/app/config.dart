@@ -10,10 +10,7 @@ abstract final class AppConfig {
   static const apiBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: appEnv == 'production' ? '/api' : 'http://localhost:3000/api');
 
   /// Public OAuth client ids (not secrets). Empty = the button is hidden.
-  static const googleClientId = String.fromEnvironment(
-    'GOOGLE_CLIENT_ID',
-    defaultValue: '496408398091-dtkgg1289q8uv2dqupahuiooc3c52ui2.apps.googleusercontent.com',
-  );
+  static const googleClientId = String.fromEnvironment('GOOGLE_CLIENT_ID');
   static const appleClientId = String.fromEnvironment('APPLE_CLIENT_ID');
   static const appleRedirectUri = String.fromEnvironment('APPLE_REDIRECT_URI');
 

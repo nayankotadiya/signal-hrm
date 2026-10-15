@@ -153,19 +153,33 @@ class AuthFrame extends StatelessWidget {
                       const SizedBox(height: 18),
                       NEntrance(
                         order: 2,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                        child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.shield_outlined, size: 13, color: t.muted),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                'Enterprise Grade Security · 256-bit Encrypted',
-                                textAlign: TextAlign.center,
-                                overflow: TextOverflow.ellipsis,
-                                style: t.text.caption(color: t.muted).copyWith(fontSize: 11.5),
-                              ),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.shield_outlined, size: 13, color: t.muted),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    'Enterprise Grade Security · 256-bit Encrypted',
+                                    textAlign: TextAlign.center,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: t.text.caption(color: t.muted).copyWith(fontSize: 11.5),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              kNUiAttribution,
+                              textAlign: TextAlign.center,
+                              style: t.text.caption(
+                                color: t.muted.withValues(alpha: isDark ? 0.75 : 0.85),
+                                weight: FontWeight.w500,
+                              ).copyWith(fontSize: 12),
                             ),
                           ],
                         ),
@@ -654,8 +668,8 @@ class _LoginPageState extends State<LoginPage> {
           ],
         ],
 
-        // Single Sign-On (Google / Apple)
-        if (AppConfig.googleClientId.isNotEmpty || AppConfig.appleClientId.isNotEmpty) ...[
+        // Single Sign-On (Apple if configured)
+        if (AppConfig.appleClientId.isNotEmpty) ...[
           const SizedBox(height: 18),
           Row(children: [
             Expanded(child: Divider(color: t.divider)),
@@ -664,16 +678,6 @@ class _LoginPageState extends State<LoginPage> {
           ]),
           const SizedBox(height: 14),
         ],
-
-        if (AppConfig.googleClientId.isNotEmpty)
-          Center(
-            child: bridge.googleButton(
-                  clientId: AppConfig.googleClientId,
-                  onToken: (token) => _run(() => _session.google(token)),
-                  onError: () => setState(() => _error = "Google sign-in couldn't start. Use email and password instead."),
-                ) ??
-                const SizedBox.shrink(),
-          ),
 
         if (AppConfig.appleClientId.isNotEmpty) ...[
           const SizedBox(height: 10),
