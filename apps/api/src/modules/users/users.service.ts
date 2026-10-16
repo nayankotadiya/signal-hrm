@@ -19,7 +19,7 @@ export const createUserInput = z.object({
   fullName: z.string().trim().min(2).max(120),
   email: z.string().trim().toLowerCase().email().optional(),
   phone: z.string().regex(/^\+[1-9]\d{7,14}$/).optional(),
-  role: z.enum(ROLES).default('employee'),
+  role: z.string().min(2).max(40).default('employee'),
   employeeId: z.string().optional(),
   sendInvitation: z.boolean().default(true),
   password: z.string().min(6).max(128).optional(),
@@ -37,6 +37,7 @@ export class UsersService {
     private readonly sessions: SessionService,
     private readonly notifications: NotificationsService,
     @InjectModel('User') private readonly users: Model<any>,
+    @InjectModel('Role') private readonly roles: Model<any>,
     @InjectModel('Invitation') private readonly invitations: Model<any>,
     @InjectModel('UserPermission') private readonly userPerms: Model<any>,
     @InjectModel('PermissionChange') private readonly changes: Model<any>,
@@ -95,7 +96,14 @@ export class UsersService {
     if (!input.email && !input.phone) throw badRequest('CONTACT_REQUIRED', 'Add an email address or phone number.', 'email');
     if (input.role === 'super_admin') throw forbidden('SUPER_ADMIN_LOCKED', 'New Super Admins cannot be created.');
     if (input.email?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL) throw forbidden('SUPER_ADMIN_LOCKED', 'Super Admin account is reserved.');
-    if (!PermissionsService.canAssignRole(ctx, input.role)) throw forbidden('GRANT_AUTHORITY', "You can't assign a role with permissions you don't hold.");
+    const roleExists = (ROLES as readonly string[]).includes(input.role as RoleKey) || (await this.roles.exists({ organizationId: ctx.orgOid, key: input.role }));
+    if (!roleExists) throw badRequest('ROLE_INVALID', `Role "${input.role}" does not exist.`, 'role');
+    let roleGrants: string[] | undefined;
+    if (!(ROLES as readonly string[]).includes(input.role as RoleKey)) {
+      const customRole = await this.roles.findOne({ organizationId: ctx.orgOid, key: input.role }, { grants: 1 }).lean<any>();
+      roleGrants = customRole?.grants;
+    }
+    if (!PermissionsService.canAssignRole(ctx, input.role, roleGrants)) throw forbidden('GRANT_AUTHORITY', "You can't assign a role with permissions you don't hold.");
     if (input.email && (await this.users.exists({ organizationId: ctx.orgOid, email: input.email }))) {
       throw conflict('EMAIL_TAKEN', 'An account with this email already exists.');
     }
@@ -220,14 +228,21 @@ export class UsersService {
   }
 
   /** Role change: validated against the caller's grant authority, audited, sessions keep working with refreshed permissions. */
-  async setRole(ctx: Ctx, id: string, role: RoleKey): Promise<any> {
+  async setRole(ctx: Ctx, id: string, role: string): Promise<any> {
     if (role === 'super_admin') throw forbidden('SUPER_ADMIN_LOCKED', 'Super Admin role cannot be assigned.');
     const user = await this.users.findOne({ _id: oid(id), organizationId: ctx.orgOid }).lean<any>();
     if (!user) throw notFound('User');
     if (this.isTargetSoleSuperAdmin(user) && !this.isSoleSuperAdmin(ctx)) throw notFound('User');
     if (this.isTargetSoleSuperAdmin(user)) throw forbidden('SUPER_ADMIN_IMMUTABLE', 'The Super Admin role cannot be changed.');
     if (String(user._id) === ctx.user.userId) throw forbidden('SELF_ROLE', "You can't change your own role.");
-    if (!PermissionsService.canAssignRole(ctx, role)) throw forbidden('GRANT_AUTHORITY', "You can't assign a role with permissions you don't hold.");
+    const roleExists = (ROLES as readonly string[]).includes(role as RoleKey) || (await this.roles.exists({ organizationId: ctx.orgOid, key: role }));
+    if (!roleExists) throw badRequest('ROLE_INVALID', `Role "${role}" does not exist.`, 'role');
+    let roleGrants: string[] | undefined;
+    if (!(ROLES as readonly string[]).includes(role as RoleKey)) {
+      const customRole = await this.roles.findOne({ organizationId: ctx.orgOid, key: role }, { grants: 1 }).lean<any>();
+      roleGrants = customRole?.grants;
+    }
+    if (!PermissionsService.canAssignRole(ctx, role, roleGrants)) throw forbidden('GRANT_AUTHORITY', "You can't assign a role with permissions you don't hold.");
     await this.users.updateOne({ _id: user._id }, { $set: { role }, $inc: { permissionsVersion: 1 } });
     this.perms.invalidate(String(user._id));
     await this.changes.create({ organizationId: ctx.orgOid, actorId: ctx.userOid, targetUserId: user._id, roleKey: role, change: 'role_assigned', before: { role: user.role }, after: { role } });

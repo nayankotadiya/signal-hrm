@@ -38,9 +38,10 @@ export const employeeInput = z.object({
   locationId: optId,
   shiftId: optId,
   probation: z.object({ endsOn: z.coerce.date().optional().nullable(), status: z.enum(['none', 'on_probation', 'confirmed', 'extended']).default('none') }).optional(),
+  isTeamLeader: z.boolean().optional(),
   /** Create a sign-in account and send an invitation in the same step. */
   invite: z.object({
-    role: z.enum(['employee', 'manager', 'hr', 'admin', 'moderator', 'user']).default('employee'),
+    role: z.string().min(2).max(40).default('employee'),
     password: z.string().min(6).max(128).optional(),
   }).optional(),
 });
@@ -188,7 +189,15 @@ export class EmployeesService implements OnModuleInit {
     const deptIds = [...new Set(rows.map((r) => String(r.departmentId ?? '')).filter(Boolean))];
     const depts = await this.departments.find({ _id: { $in: deptIds.map(oid) } }, { name: 1 }).lean<any[]>();
     const deptName = new Map(depts.map((d) => [String(d._id), d.name]));
-    const items = rows.map((r) => ({ ...serialize(r), departmentName: deptName.get(String(r.departmentId)) ?? null, sensitive: { locked: true } }));
+    const rowIds = rows.map((r) => r._id);
+    const ledTeams = await this.teams.find({ organizationId: ctx.orgOid, leadEmployeeId: { $in: rowIds }, status: 'active' }, { leadEmployeeId: 1 }).lean<any[]>();
+    const ledSet = new Set(ledTeams.map((t) => String(t.leadEmployeeId)));
+    const items = rows.map((r) => ({
+      ...serialize(r),
+      departmentName: deptName.get(String(r.departmentId)) ?? null,
+      isTeamLeader: ledSet.has(String(r._id)),
+      sensitive: { locked: true },
+    }));
     return { items, page: q.page, limit: q.limit, total, hasMore: q.page * q.limit < total };
   }
 
@@ -198,14 +207,16 @@ export class EmployeesService implements OnModuleInit {
     if (e.contactEmail?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL && !this.isSoleSuperAdmin(ctx)) throw notFound('Employee');
     const [dept, team, manager, location, shift, user] = await Promise.all([
       e.departmentId ? this.departments.findById(e.departmentId, { name: 1 }).lean<any>() : null,
-      e.teamId ? this.teams.findById(e.teamId, { name: 1 }).lean<any>() : null,
+      e.teamId ? this.teams.findById(e.teamId, { name: 1, leadEmployeeId: 1 }).lean<any>() : null,
       e.reportingManagerId ? this.employees.findById(e.reportingManagerId, { firstName: 1, lastName: 1, designation: 1 }).lean<any>() : null,
       e.locationId ? this.locations.findById(e.locationId, { name: 1 }).lean<any>() : null,
       e.shiftId ? this.shifts.findById(e.shiftId, { name: 1, startTime: 1, endTime: 1 }).lean<any>() : null,
       e.userId ? this.users.findById(e.userId, { role: 1, status: 1, email: 1, lastLoginAt: 1 }).lean<any>() : null,
     ]);
+    const isLeader = Boolean(team && String(team.leadEmployeeId) === String(e._id));
     return {
       ...(await this.present(ctx, e)),
+      isTeamLeader: isLeader,
       department: serialize(dept),
       team: serialize(team),
       manager: manager ? { id: String(manager._id), name: `${manager.firstName} ${manager.lastName ?? ''}`.trim(), designation: manager.designation } : null,
@@ -273,9 +284,15 @@ export class EmployeesService implements OnModuleInit {
     if (input.contactEmail && (await this.employees.exists({ organizationId: ctx.orgOid, contactEmail: input.contactEmail }))) {
       throw conflict('EMPLOYEE_EMAIL_TAKEN', 'Another employee already uses this email.');
     }
-    const { invite, ...rest } = input;
+    const { invite, isTeamLeader, ...rest } = input;
     const doc = await this.employees.create({ ...this.ids(rest), organizationId: ctx.orgOid, employeeCode: code, status: 'onboarding', createdBy: ctx.userOid });
-    if (doc.teamId) await this.teams.updateOne({ _id: doc.teamId }, { $addToSet: { memberIds: doc._id } });
+    const isLeader = isTeamLeader === true || invite?.role === 'team_leader';
+    if (doc.teamId) {
+      await this.teams.updateOne({ _id: doc.teamId }, { $addToSet: { memberIds: doc._id } });
+      if (isLeader) {
+        await this.teams.updateOne({ _id: doc.teamId }, { $set: { leadEmployeeId: doc._id } });
+      }
+    }
     await this.history.create({ organizationId: ctx.orgOid, employeeId: doc._id, type: 'joined', to: { departmentId: doc.departmentId, teamId: doc.teamId, designation: doc.designation }, effectiveOn: input.joiningDate ?? new Date(), byUserId: ctx.userOid });
     await this.checklists.create({
       organizationId: ctx.orgOid,
@@ -303,7 +320,7 @@ export class EmployeesService implements OnModuleInit {
     if (before.contactEmail?.toLowerCase() === SOLE_SUPER_ADMIN_EMAIL && !this.isSoleSuperAdmin(ctx)) throw notFound('Employee');
     if (!(await this.scope.covers(ctx, 'employees', 'edit', before._id))) throw forbidden('FORBIDDEN', "You don't have permission to edit this employee.");
     await this.validateRefs(ctx, input, id);
-    const { effectiveOn, note, ...fields } = input;
+    const { effectiveOn, note, isTeamLeader, ...fields } = input;
     if (fields.employeeCode && fields.employeeCode !== before.employeeCode && (await this.employees.exists({ organizationId: ctx.orgOid, employeeCode: fields.employeeCode }))) {
       throw conflict('EMPLOYEE_CODE_TAKEN', `Employee ID ${fields.employeeCode} is already used.`);
     }
@@ -318,8 +335,19 @@ export class EmployeesService implements OnModuleInit {
       }
     }
     if ('teamId' in set && String(set.teamId ?? '') !== String(before.teamId ?? '')) {
-      if (before.teamId) await this.teams.updateOne({ _id: before.teamId }, { $pull: { memberIds: before._id } });
+      if (before.teamId) {
+        await this.teams.updateOne({ _id: before.teamId }, { $pull: { memberIds: before._id } });
+        await this.teams.updateOne({ _id: before.teamId, leadEmployeeId: before._id }, { $set: { leadEmployeeId: null } });
+      }
       if (set.teamId) await this.teams.updateOne({ _id: set.teamId }, { $addToSet: { memberIds: before._id } });
+    }
+    if (isTeamLeader !== undefined) {
+      const activeTeamId = set.teamId ?? before.teamId;
+      if (isTeamLeader && activeTeamId) {
+        await this.teams.updateOne({ _id: activeTeamId }, { $set: { leadEmployeeId: before._id } });
+      } else if (!isTeamLeader && activeTeamId) {
+        await this.teams.updateOne({ _id: activeTeamId, leadEmployeeId: before._id }, { $set: { leadEmployeeId: null } });
+      }
     }
     if (fields.firstName || fields.lastName) {
       if (before.userId) await this.users.updateOne({ _id: before.userId }, { $set: { fullName: `${fields.firstName ?? before.firstName} ${fields.lastName ?? before.lastName ?? ''}`.trim() } });

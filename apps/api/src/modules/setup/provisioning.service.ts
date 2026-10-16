@@ -8,6 +8,7 @@ const ROLE_NAMES: Record<string, string> = {
   admin: 'Admin / CEO',
   hr: 'HR',
   manager: 'Manager',
+  team_leader: 'Team Leader',
   employee: 'Employee',
   moderator: 'Moderator',
   user: 'User',

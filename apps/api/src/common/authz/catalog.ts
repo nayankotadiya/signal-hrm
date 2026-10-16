@@ -53,7 +53,7 @@ export type Resource = keyof typeof RESOURCES;
 
 export const SOLE_SUPER_ADMIN_EMAIL = 'nayankotadiya686@gmail.com';
 
-export const ROLES = ['super_admin', 'admin', 'hr', 'manager', 'employee', 'moderator', 'user'] as const;
+export const ROLES = ['super_admin', 'admin', 'hr', 'manager', 'team_leader', 'employee', 'moderator', 'user'] as const;
 export type RoleKey = (typeof ROLES)[number];
 
 export interface Grant {
@@ -110,8 +110,8 @@ export const DEFAULT_ROLE_GRANTS: Record<RoleKey, string[]> = {
     ...org('employees', ['view', 'create', 'edit', 'export']),
     ...org('departments', ['view', 'create', 'edit', 'delete', 'assign']),
     ...org('teams', ['view', 'create', 'edit', 'delete', 'assign']),
-    ...org('roles', ['view', 'manage']),
-    ...org('features', ['view']),
+    ...org('roles', ['view', 'create', 'edit', 'delete', 'manage']),
+    ...org('features', ['view', 'configure', 'manage']),
     ...org('attendance', ['view', 'export']),
     ...org('locations', ['view']),
     ...org('shifts', ['view']),
@@ -135,11 +135,13 @@ export const DEFAULT_ROLE_GRANTS: Record<RoleKey, string[]> = {
   hr: [
     ...SELF,
     ...org('organization', ['view']),
-    ...org('users', ['view', 'create', 'edit']),
+    ...org('users', ['view', 'create', 'edit', 'manage']),
     ...org('employees', ['view', 'create', 'edit', 'export']),
     ...org('employees_sensitive', ['view', 'edit']),
     ...org('departments', ['view', 'assign']),
     ...org('teams', ['view', 'create', 'edit', 'assign']),
+    ...org('roles', ['view', 'create', 'edit', 'manage']),
+    ...org('features', ['view', 'configure', 'manage']),
     ...org('attendance', ['view', 'edit', 'approve', 'reject', 'export']),
     ...org('attendance_evidence', ['view']),
     ...org('locations', ['view', 'configure']),
@@ -158,6 +160,22 @@ export const DEFAULT_ROLE_GRANTS: Record<RoleKey, string[]> = {
 
   // Manager: assigned team only. No unrelated departments or company-wide confidential data.
   manager: [
+    ...SELF,
+    ...team('employees', ['view']),
+    ...team('attendance', ['view', 'approve', 'reject']),
+    ...team('shifts', ['view', 'approve', 'reject']),
+    ...team('leave', ['view', 'approve', 'reject']),
+    ...team('expenses', ['view', 'approve', 'reject']),
+    ...team('travel', ['view', 'approve', 'reject']),
+    ...team('tasks', ['view', 'create', 'edit', 'assign']),
+    ...team('meetings', ['view', 'create', 'edit']),
+    ...team('approvals', ['view', 'approve', 'reject']),
+    ...team('reports', ['view']),
+    ...team('teams', ['view']),
+  ],
+
+  // Team Leader: assigned team in structure. Leads team tasks, approvals, attendance, and leave.
+  team_leader: [
     ...SELF,
     ...team('employees', ['view']),
     ...team('attendance', ['view', 'approve', 'reject']),

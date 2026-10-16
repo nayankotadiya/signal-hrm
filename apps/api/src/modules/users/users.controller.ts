@@ -61,7 +61,7 @@ export class UsersController {
   @Put(':id/role')
   @RequireReauth()
   role(@C() ctx: Ctx, @Param('id') id: string, @Body() body: unknown) {
-    return this.users.setRole(ctx, id, parse(z.object({ role: z.enum(ROLES) }), body).role);
+    return this.users.setRole(ctx, id, parse(z.object({ role: z.string().min(2).max(40) }), body).role);
   }
 
   @Get(':id/permissions')

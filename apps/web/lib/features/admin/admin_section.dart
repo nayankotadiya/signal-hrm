@@ -844,6 +844,44 @@ class _RolesTabState extends State<RolesTab> {
               }),
               options: [for (final r in roles) NOption('${r['key']}', '${r['name']} (${r['userCount'] ?? 0})')],
             ),
+            if (canEdit)
+              NButton(
+                label: 'New role',
+                icon: Icons.add_rounded,
+                compact: true,
+                variant: NButtonVariant.accent,
+                onPressed: () async {
+                  final r = await showFormSheet<Json>(
+                    context,
+                    title: 'Create new role',
+                    subtitle: 'Define a custom role with tailored permissions.',
+                    fields: [
+                      const FieldSpec('name', 'Role name', required: true, helper: 'Example: Shift Supervisor, Sales Lead'),
+                      const FieldSpec('key', 'Role identifier (slug)', helper: 'Optional. Lowercase with underscores, e.g. shift_supervisor'),
+                      const FieldSpec('description', 'Description', kind: FieldKind.multiline),
+                      FieldSpec(
+                        'copyFrom',
+                        'Copy base permissions from',
+                        kind: FieldKind.select,
+                        options: [
+                          for (final ro in roles) NOption('${ro['key']}', '${ro['name']}'),
+                        ],
+                        helper: 'Start with an existing role and tweak permissions.',
+                      ),
+                    ],
+                    submitLabel: 'Create role',
+                    successMessage: 'Role created.',
+                    submit: (v, key) async => jsonMap(await context.api.post('/roles', body: v, idempotencyKey: key)),
+                  );
+                  if (r != null) {
+                    setState(() {
+                      _role = '${r['key']}';
+                      _draft = null;
+                    });
+                    reload();
+                  }
+                },
+              ),
             if (!locked && _draft != null) ...[
               NButton(
                 label: 'Save role',
@@ -868,7 +906,7 @@ class _RolesTabState extends State<RolesTab> {
               ),
               NButton(label: 'Discard', compact: true, variant: NButtonVariant.secondary, onPressed: () => setState(() => _draft = null)),
             ],
-            if (!locked && _draft == null)
+            if (!locked && _draft == null && role['system'] == true)
               NButton(
                 label: 'Reset to default',
                 compact: true,
@@ -884,8 +922,59 @@ class _RolesTabState extends State<RolesTab> {
                   }
                 },
               ),
+            if (canEdit && role['system'] != true && role['key'] != 'super_admin' && _draft == null)
+              NButton(
+                label: 'Delete role',
+                icon: Icons.delete_outline_rounded,
+                compact: true,
+                variant: NButtonVariant.secondary,
+                onPressed: () async {
+                  final count = (role['userCount'] as num?)?.toInt() ?? 0;
+                  if (count > 0) {
+                    showError(context, 'Cannot delete ${role['name']}: $count user(s) are assigned to it.');
+                    return;
+                  }
+                  final c = await showNConfirm(
+                    context,
+                    title: 'Delete ${role['name']}?',
+                    message: 'This custom role will be permanently removed.',
+                    confirmLabel: 'Delete',
+                    destructive: true,
+                  );
+                  if (!c.confirmed || !context.mounted) return;
+                  try {
+                    await context.api.delete('/roles/${role['key']}');
+                    if (context.mounted) NToast.of(context).show('Role deleted.');
+                    setState(() {
+                      _role = null;
+                      _draft = null;
+                    });
+                    reload();
+                  } catch (e) {
+                    if (context.mounted) showError(context, e);
+                  }
+                },
+              ),
           ]),
           if (role['key'] == 'super_admin') const Padding(padding: EdgeInsets.only(bottom: 12), child: NBanner(message: 'Super Admin always holds every permission and cannot be edited.', tone: NBannerTone.info)),
+          Row(children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: (role['system'] == true ? t.muted : t.accent).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                role['system'] == true ? 'System Role' : 'Custom Role',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: role['system'] == true ? t.muted : t.accent),
+              ),
+            ),
+            if (role['description'] != null && '${role['description']}'.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Expanded(child: Text('${role['description']}', style: t.text.caption(), overflow: TextOverflow.ellipsis)),
+            ],
+          ]),
+          const SizedBox(height: 6),
           Text('Scopes: own < team < department < organization. Leaving an action empty means no access.', style: t.text.caption()),
           const SizedBox(height: 8),
           for (final res in resources.entries)

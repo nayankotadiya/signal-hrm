@@ -34,7 +34,8 @@ class PeopleSection extends StatelessWidget {
 }
 
 const _employmentTypes = [NOption('full_time', 'Full-time'), NOption('part_time', 'Part-time'), NOption('contract', 'Contract'), NOption('intern', 'Intern'), NOption('consultant', 'Consultant')];
-const _inviteRoles = [NOption('employee', 'Employee'), NOption('manager', 'Manager'), NOption('hr', 'HR'), NOption('admin', 'Admin / CEO'), NOption('moderator', 'Moderator'), NOption('user', 'User (limited)')];
+
+bool _hasTeam(Json v) => v['teamId'] != null && v['teamId'].toString().isNotEmpty;
 
 List<FieldSpec> employeeFields({bool create = false}) => [
       const FieldSpec('firstName', 'First name', required: true),
@@ -47,6 +48,13 @@ List<FieldSpec> employeeFields({bool create = false}) => [
       const FieldSpec('joiningDate', 'Joining date', kind: FieldKind.date),
       const FieldSpec('departmentId', 'Department', kind: FieldKind.asyncSelect, loadOptions: Lookups.departments),
       const FieldSpec('teamId', 'Team', kind: FieldKind.asyncSelect, loadOptions: Lookups.teams),
+      const FieldSpec(
+        'isTeamLeader',
+        'Team Leader',
+        kind: FieldKind.toggle,
+        description: 'Set as the official Team Leader of this team in the company structure.',
+        visibleWhen: _hasTeam,
+      ),
       const FieldSpec('reportingManagerId', 'Reporting manager', kind: FieldKind.asyncSelect, loadOptions: Lookups.employees),
       const FieldSpec('locationId', 'Work location', kind: FieldKind.asyncSelect, loadOptions: Lookups.locations, helper: 'Check-in is verified against this location.'),
       const FieldSpec('shiftId', 'Default shift', kind: FieldKind.asyncSelect, loadOptions: Lookups.shifts),
@@ -54,7 +62,7 @@ List<FieldSpec> employeeFields({bool create = false}) => [
       const FieldSpec('probation.endsOn', 'Probation ends', kind: FieldKind.date),
       const FieldSpec('employeeCode', 'Employee code', helper: 'Leave empty to number automatically.'),
       if (create) const FieldSpec('inviteNow', 'Create a sign-in account', kind: FieldKind.toggle),
-      if (create) FieldSpec('inviteRole', 'Role', kind: FieldKind.select, options: _inviteRoles, visibleWhen: (v) => v['inviteNow'] == true),
+      if (create) FieldSpec('inviteRole', 'Role', kind: FieldKind.asyncSelect, loadOptions: Lookups.roles, visibleWhen: (v) => v['inviteNow'] == true),
       if (create)
         const FieldSpec(
           'setPassword',
@@ -81,9 +89,11 @@ Json employeeBody(Json v) {
     ..remove('inviteRole')
     ..remove('setPassword');
   final pwd = out.remove('password')?.toString().trim();
+  final isLeader = v['isTeamLeader'] == true || v['inviteRole'] == 'team_leader';
+  out['isTeamLeader'] = isLeader;
   if (v['inviteNow'] == true) {
     out['invite'] = {
-      'role': v['inviteRole'] ?? 'employee',
+      'role': v['inviteRole'] ?? (isLeader ? 'team_leader' : 'employee'),
       if (v['setPassword'] == true && pwd != null && pwd.isNotEmpty) 'password': pwd,
     };
   }
@@ -135,6 +145,7 @@ class _DirectoryTabState extends State<DirectoryTab> {
   @override
   Widget build(BuildContext context) {
     final me = context.me;
+    final t = NTokens.of(context);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Toolbar(children: [
         SizedBox(width: 260, child: NSearchField(hint: 'Search name, code, email, role', onChanged: (v) => setState(() => _q = v))),
@@ -164,7 +175,23 @@ class _DirectoryTabState extends State<DirectoryTab> {
           rows: [
             for (final e in items)
               [
-                Row(children: [NAvatar(name: employeeName(e), size: 28), const SizedBox(width: 8), Flexible(child: Text(employeeName(e), overflow: TextOverflow.ellipsis))]),
+                Row(children: [
+                  NAvatar(name: employeeName(e), size: 28),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Flexible(child: Text(employeeName(e), overflow: TextOverflow.ellipsis)),
+                      if (e['isTeamLeader'] == true) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                          decoration: BoxDecoration(color: t.accent.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(4)),
+                          child: Text('TL', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: t.accent)),
+                        ),
+                      ],
+                    ]),
+                  ),
+                ]),
                 Text('${e['employeeCode']}'),
                 Text('${e['designation'] ?? '—'}'),
                 Text('${e['departmentName'] ?? '—'}'),
@@ -241,11 +268,11 @@ class _EmployeePageState extends State<EmployeePage> {
       context,
       title: 'Create Account / Invite',
       subtitle: 'Create Login ID & password directly, or send an email invitation.',
-      initial: {'email': e['contactEmail'], 'fullName': '${e['firstName']} ${e['lastName'] ?? ''}'.trim(), 'role': 'employee', 'createPassword': true},
+      initial: {'email': e['contactEmail'], 'fullName': '${e['firstName']} ${e['lastName'] ?? ''}'.trim(), 'role': e['isTeamLeader'] == true ? 'team_leader' : 'employee', 'createPassword': true},
       fields: [
         const FieldSpec('fullName', 'Full name', required: true),
         const FieldSpec('email', 'Email (Login ID)', kind: FieldKind.email, required: true),
-        const FieldSpec('role', 'Role', kind: FieldKind.select, options: _inviteRoles, required: true),
+        const FieldSpec('role', 'Role', kind: FieldKind.asyncSelect, loadOptions: Lookups.roles, required: true),
         const FieldSpec(
           'createPassword',
           'Create Password directly',
@@ -325,6 +352,7 @@ class _EmployeePageState extends State<EmployeePage> {
                   const SizedBox(height: 6),
                   Wrap(spacing: 6, runSpacing: 6, children: [
                     StatusChip('${e['status']}'),
+                    if (e['isTeamLeader'] == true) const StatusChip('active', label: 'Team Leader'),
                     if (account != null) StatusChip('${account['status']}', label: 'Account: ${Fmt.label(account['status'])} · ${Fmt.label(account['role'])}') else const StatusChip('none', label: 'No sign-in account'),
                   ]),
                 ]),
@@ -588,7 +616,7 @@ class _OrgTabState extends State<OrgTab> {
       fields: const [
         FieldSpec('name', 'Name', required: true),
         FieldSpec('departmentId', 'Department', kind: FieldKind.asyncSelect, loadOptions: Lookups.departments),
-        FieldSpec('leadEmployeeId', 'Team lead', kind: FieldKind.asyncSelect, loadOptions: Lookups.employees),
+        FieldSpec('leadEmployeeId', 'Team Leader', kind: FieldKind.asyncSelect, loadOptions: Lookups.employees, helper: 'Designated Team Leader in company structure.'),
       ],
       successMessage: 'Team saved.',
       submit: (v, key) async => jsonMap(tm == null ? await api.post('/teams', body: v, idempotencyKey: key) : await api.patch('/teams/${tm['id']}', body: v, idempotencyKey: key)),
@@ -646,7 +674,7 @@ class _OrgTabState extends State<OrgTab> {
                   for (final tm in items.where((x) => x['status'] != 'archived'))
                     NListRow(
                       title: '${tm['name']}',
-                      subtitle: [if (tm['departmentName'] != null) '${tm['departmentName']}', '${(tm['memberIds'] as List? ?? const []).length} members', if (tm['leadName'] != null) 'Lead: ${tm['leadName']}'].join(' · '),
+                      subtitle: [if (tm['departmentName'] != null) '${tm['departmentName']}', '${(tm['memberIds'] as List? ?? const []).length} members', if (tm['leadName'] != null) 'Team Leader: ${tm['leadName']}'].join(' · '),
                       trailing: me.can('teams', 'edit')
                           ? Wrap(children: [
                               IconButton(tooltip: 'Edit', icon: const Icon(Icons.edit_rounded, size: 18), onPressed: () => _team(tm)),

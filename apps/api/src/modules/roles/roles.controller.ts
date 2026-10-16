@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Model } from 'mongoose';
 import { z } from 'zod';
@@ -6,8 +6,19 @@ import { AuditService } from '../../common/audit/audit.service';
 import { C, Can, Ctx, RequireReauth } from '../../common/auth/context';
 import { ACTIONS, DEFAULT_ROLE_GRANTS, parseGrant, RESOURCES, ROLES, RoleKey, SCOPES, SOLE_SUPER_ADMIN_EMAIL } from '../../common/authz/catalog';
 import { PermissionsService } from '../../common/authz/permissions.service';
-import { badRequest, forbidden, listQuery, notFound, parse } from '../../common/http/validation';
+import { badRequest, conflict, forbidden, listQuery, notFound, parse } from '../../common/http/validation';
 import { InjectModel, serialize } from '../../database/model';
+
+const ROLE_NAMES: Record<string, string> = {
+  super_admin: 'Super Admin',
+  admin: 'Admin / CEO',
+  hr: 'HR',
+  manager: 'Manager',
+  team_leader: 'Team Leader',
+  employee: 'Employee',
+  moderator: 'Moderator',
+  user: 'User',
+};
 
 @ApiTags('roles')
 @Controller({ path: 'roles', version: '1' })
@@ -37,9 +48,29 @@ export class RolesController {
   @Can('roles', 'view')
   async list(@C() ctx: Ctx) {
     const isSole = this.isSoleSuperAdmin(ctx);
+
+    // Ensure built-in system roles (e.g. team_leader) exist for this organization
+    for (const key of ROLES) {
+      if (key === 'super_admin' && !isSole) continue;
+      await this.roles.updateOne(
+        { organizationId: ctx.orgOid, key },
+        {
+          $setOnInsert: {
+            organizationId: ctx.orgOid,
+            key,
+            name: ROLE_NAMES[key] ?? key,
+            grants: DEFAULT_ROLE_GRANTS[key as RoleKey] ?? [],
+            system: true,
+            version: 1,
+          },
+        },
+        { upsert: true },
+      );
+    }
+
     const filter: Record<string, unknown> = { organizationId: ctx.orgOid };
     if (!isSole) filter.key = { $ne: 'super_admin' };
-    const rows = await this.roles.find(filter).sort({ key: 1 }).lean<any[]>();
+    const rows = await this.roles.find(filter).sort({ system: -1, key: 1 }).lean<any[]>();
     const matchUsers: Record<string, unknown> = { organizationId: ctx.orgOid };
     if (!isSole) {
       matchUsers.role = { $ne: 'super_admin' };
@@ -48,6 +79,98 @@ export class RolesController {
     const counts = await this.users.aggregate([{ $match: matchUsers }, { $group: { _id: '$role', n: { $sum: 1 } } }]);
     const countOf = new Map(counts.map((c: any) => [c._id, c.n]));
     return { items: serialize(rows).map((r: any) => ({ ...r, userCount: countOf.get(r.key) ?? 0 })) };
+  }
+
+  /**
+   * Create a new custom role.
+   */
+  @Post()
+  @Can('roles', 'manage', 'organization')
+  @RequireReauth()
+  async create(@C() ctx: Ctx, @Body() body: unknown) {
+    const b = parse(
+      z.object({
+        name: z.string().trim().min(2).max(60),
+        key: z.string().trim().toLowerCase().regex(/^[a-z0-9_-]{2,30}$/, 'Key must be 2-30 lowercase characters, digits, underscores or dashes').optional(),
+        description: z.string().max(300).optional(),
+        copyFrom: z.string().optional(),
+        grants: z.array(z.string()).max(500).optional(),
+      }),
+      body,
+    );
+
+    let key = b.key;
+    if (!key) {
+      key = b.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30);
+      if (key.length < 2) key = `role_${Date.now().toString(36)}`;
+    }
+
+    if (key === 'super_admin') throw forbidden('SUPER_ADMIN_LOCKED', 'Cannot create Super Admin role.');
+    if (await this.roles.exists({ organizationId: ctx.orgOid, key })) {
+      throw conflict('ROLE_EXISTS', `A role with key "${key}" already exists.`);
+    }
+
+    let initialGrants: string[] = [];
+    if (b.grants && b.grants.length > 0) {
+      initialGrants = b.grants;
+    } else if (b.copyFrom) {
+      const sourceRole = await this.roles.findOne({ organizationId: ctx.orgOid, key: b.copyFrom }).lean<any>();
+      if (sourceRole?.grants) {
+        initialGrants = sourceRole.grants;
+      } else if (DEFAULT_ROLE_GRANTS[b.copyFrom as RoleKey]) {
+        initialGrants = DEFAULT_ROLE_GRANTS[b.copyFrom as RoleKey] ?? [];
+      }
+    } else {
+      initialGrants = [...DEFAULT_ROLE_GRANTS.employee];
+    }
+
+    for (const g of initialGrants) {
+      if (!parseGrant(g)) throw badRequest('GRANT_INVALID', `"${g}" is not a valid permission.`, 'grants');
+      if (!PermissionsService.canGrant(ctx, g)) {
+        throw forbidden('GRANT_AUTHORITY', `You can't grant "${g}" because you don't hold it at that scope.`);
+      }
+    }
+
+    const doc = await this.roles.create({
+      organizationId: ctx.orgOid,
+      key,
+      name: b.name,
+      description: b.description ?? '',
+      grants: [...new Set(initialGrants)],
+      system: false,
+      version: 1,
+    });
+
+    this.perms.invalidateAll();
+    await this.changes.create({ organizationId: ctx.orgOid, actorId: ctx.userOid, roleKey: key, change: 'role_updated', after: { added: initialGrants } });
+    await this.audit.record(ctx, { action: 'role.create', resourceType: 'role', resourceId: key, changes: { name: { from: null, to: b.name }, grants: { from: null, to: initialGrants } } });
+
+    return serialize(doc.toObject());
+  }
+
+  /**
+   * Delete a custom role. Built-in system roles cannot be deleted.
+   */
+  @Delete(':key')
+  @Can('roles', 'manage', 'organization')
+  @RequireReauth()
+  async deleteRole(@C() ctx: Ctx, @Param('key') key: string) {
+    if (key === 'super_admin' || (ROLES as readonly string[]).includes(key as RoleKey)) {
+      throw forbidden('ROLE_SYSTEM', 'Built-in system roles cannot be deleted.');
+    }
+    const role = await this.roles.findOne({ organizationId: ctx.orgOid, key }).lean<any>();
+    if (!role) throw notFound('Role');
+    if (role.system) {
+      throw forbidden('ROLE_SYSTEM', 'Built-in system roles cannot be deleted.');
+    }
+    const userCount = await this.users.countDocuments({ organizationId: ctx.orgOid, role: key });
+    if (userCount > 0) {
+      throw conflict('ROLE_IN_USE', `Cannot delete role because ${userCount} user(s) are assigned to it. Reassign them first.`);
+    }
+    await this.roles.deleteOne({ _id: role._id });
+    this.perms.invalidateAll();
+    await this.audit.record(ctx, { action: 'role.delete', resourceType: 'role', resourceId: key });
+    return { deleted: true };
   }
 
   /**

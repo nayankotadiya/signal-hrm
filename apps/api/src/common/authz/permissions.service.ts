@@ -115,13 +115,18 @@ export class PermissionsService {
     return ctx.authz.can(g.resource, g.action, g.scope === 'records' ? 'own' : g.scope);
   }
 
-  static canAssignRole(ctx: Ctx, role: string): boolean {
-    if (!ROLES.includes(role as RoleKey)) return false;
+  static canAssignRole(ctx: Ctx, role: string, customGrants?: string[]): boolean {
     // Nobody can ever assign super_admin. nayankotadiya686@gmail.com is the sole Super Admin.
     if (role === 'super_admin') return false;
     if (!ctx.authz.can('roles', 'manage')) return false;
-    // A role may be assigned only if every grant it carries could be granted by the caller.
-    return ctx.authz.isSuperAdmin || DEFAULT_ROLE_GRANTS[role as RoleKey].every((s) => PermissionsService.canGrant(ctx, s));
+    if (ctx.authz.isSuperAdmin) return true;
+    if (ROLES.includes(role as RoleKey)) {
+      return DEFAULT_ROLE_GRANTS[role as RoleKey].every((s) => PermissionsService.canGrant(ctx, s));
+    }
+    if (customGrants) {
+      return customGrants.every((s) => PermissionsService.canGrant(ctx, s));
+    }
+    return true;
   }
 
   /** The permission set returned to the client (it only reads it; the server re-checks every call). */
