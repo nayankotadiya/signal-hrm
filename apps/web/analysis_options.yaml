@@ -5,6 +5,7 @@ analyzer:
     - lib/l10n/gen/**
     - build/**
     - web/**
+    - android/**
   language:
     strict-casts: true
     strict-raw-types: true

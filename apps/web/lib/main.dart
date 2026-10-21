@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 
@@ -9,7 +10,9 @@ import 'data/demo_backend.dart';
 import 'data/health_api.dart';
 
 Future<void> main() async {
-  usePathUrlStrategy(); // clean URLs: /gallery instead of /#/gallery
+  if (kIsWeb) {
+    usePathUrlStrategy(); // clean URLs: /gallery instead of /#/gallery
+  }
   if (AppConfig.demo) {
     WidgetsFlutterBinding.ensureInitialized();
     final demo = await DemoBackend.load();

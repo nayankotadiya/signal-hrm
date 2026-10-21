@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 
@@ -25,10 +26,20 @@ class StubBridge implements PlatformBridge {
   void writeLocal(String key, String? value) => value == null ? _store.remove(key) : _store[key] = value;
 
   @override
-  Future<GeoReading> currentPosition({Duration timeout = const Duration(seconds: 20)}) async => throw const GeoException(GeoFailure.unsupported);
+  Future<GeoReading> currentPosition({Duration timeout = const Duration(seconds: 20)}) async {
+    return const GeoReading(latitude: 23.0225, longitude: 72.5714, accuracyMeters: 12.0);
+  }
 
   @override
-  Future<PickedFile?> pickFile({String accept = '*/*', String? capture}) async => null;
+  Future<PickedFile?> pickFile({String accept = '*/*', String? capture}) async {
+    try {
+      final byteData = await rootBundle.load('assets/demo/selfie.jpg');
+      final bytes = byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes);
+      return PickedFile(name: 'selfie.jpg', bytes: bytes, mimeType: 'image/jpeg');
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
   void downloadBytes(Uint8List bytes, String fileName, String mimeType) {}

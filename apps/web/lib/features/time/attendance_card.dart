@@ -1019,7 +1019,7 @@ class _SelfieSheetState extends State<_SelfieSheet> {
                       label: FittedBox(
                         fit: BoxFit.scaleDown,
                         child: Text(
-                          isMobile ? '✓ Confirm' : '✓ Confirm & Continue',
+                          isMobile ? 'Confirm' : 'Confirm & Continue',
                           style: t.text.body(weight: FontWeight.w700, color: Colors.white),
                         ),
                       ),
