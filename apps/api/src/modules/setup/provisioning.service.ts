@@ -29,6 +29,7 @@ export class ProvisioningService {
     @InjectModel('LeavePolicy') private readonly leavePolicies: Model<any>,
     @InjectModel('ExpenseCategory') private readonly expenseCategories: Model<any>,
     @InjectModel('LeadSource') private readonly leadSources: Model<any>,
+    @InjectModel('StatutoryRule') private readonly statutoryRules: Model<any>,
   ) {}
 
   async provision(orgId: Types.ObjectId): Promise<void> {
@@ -93,6 +94,21 @@ export class ProvisioningService {
       ['import', 'Import'],
     ]) {
       await this.leadSources.updateOne({ organizationId: orgId, key: s[0] }, { $setOnInsert: { organizationId: orgId, key: s[0], name: s[1], active: true } }, { upsert: true });
+    }
+
+    const defaultStatutory = [
+      { code: 'PF_EMPLOYEE', name: 'Provident Fund (Employee)', kind: 'deduction', basis: 'component', basisComponent: 'basic', percent: 12, wageCeiling: 15000, cap: 1800, active: true },
+      { code: 'PF_EMPLOYER', name: 'Provident Fund (Employer)', kind: 'employer_contribution', basis: 'component', basisComponent: 'basic', percent: 12, wageCeiling: 15000, cap: 1800, active: true },
+      { code: 'ESI_EMPLOYEE', name: 'ESI (Employee)', kind: 'deduction', basis: 'gross', wageCeiling: 21000, percent: 0.75, active: true },
+      { code: 'ESI_EMPLOYER', name: 'ESI (Employer)', kind: 'employer_contribution', basis: 'gross', wageCeiling: 21000, percent: 3.25, active: true },
+      { code: 'PT_GJ', name: 'Professional Tax (Gujarat)', kind: 'deduction', basis: 'slab', slabs: [{ upTo: 11999, amount: 0 }, { upTo: 999999999, amount: 200 }], active: true },
+    ];
+    for (const r of defaultStatutory) {
+      await this.statutoryRules.updateOne(
+        { organizationId: orgId, code: r.code },
+        { $setOnInsert: { organizationId: orgId, ...r } },
+        { upsert: true },
+      );
     }
   }
 }
