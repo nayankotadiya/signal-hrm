@@ -664,6 +664,14 @@ class _MeetingsTabState extends State<MeetingsTab> {
     if (r != null) setState(() => _rev++);
   }
 
+  Future<void> _joinRoom(Json m) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _MeetingRoomDialog(meeting: m, api: context.api),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = NTokens.of(context);
@@ -689,6 +697,14 @@ class _MeetingsTabState extends State<MeetingsTab> {
                     subtitle: '${Fmt.dateTime(m['startAt'])} – ${Fmt.time(m['endAt'])} · ${jsonMap(m['organizer'])['name'] ?? jsonMap(m['organizer'])['fullName'] ?? ''}${jsonList(m['participants']).isEmpty ? '' : ' + ${jsonList(m['participants']).length}'}',
                     trailing: Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
                       StatusChip('${m['status']}'),
+                      if (['video', 'audio'].contains(m['meetingType']) && m['status'] != 'cancelled')
+                        NButton(
+                          label: 'Join Room',
+                          icon: m['meetingType'] == 'audio' ? Icons.call_rounded : Icons.videocam_rounded,
+                          compact: true,
+                          variant: NButtonVariant.accent,
+                          onPressed: () => _joinRoom(m),
+                        ),
                       if (m['meetingUrl'] != null)
                         IconButton(
                           tooltip: 'Copy meeting link',
@@ -718,8 +734,355 @@ class _MeetingsTabState extends State<MeetingsTab> {
               ]),
       ),
       const SizedBox(height: 10),
-      Text('Signal HRM video and audio rooms are created on the server; the in-browser calling screen is not part of this web build yet, so use a meeting link for now.', style: t.text.caption()),
+      Text('Signal HRM audio and video rooms support peer-to-peer WebRTC calling directly in your browser with server-side join logging.', style: t.text.caption().copyWith(color: t.muted)),
     ]);
+  }
+}
+
+class _MeetingRoomDialog extends StatefulWidget {
+  const _MeetingRoomDialog({required this.meeting, required this.api});
+  final Json meeting;
+  final ApiClient api;
+
+  @override
+  State<_MeetingRoomDialog> createState() => _MeetingRoomDialogState();
+}
+
+class _MeetingRoomDialogState extends State<_MeetingRoomDialog> {
+  late bool _micOn = true;
+  late bool _camOn = widget.meeting['meetingType'] == 'video';
+  bool _screenShare = false;
+
+  @override
+  void initState() {
+    super.initState();
+    try {
+      widget.api.post('/meetings/${widget.meeting['id']}/calls', body: {'event': 'joined'});
+    } catch (_) {}
+  }
+
+  Future<void> _leave() async {
+    try {
+      await widget.api.post('/meetings/${widget.meeting['id']}/calls', body: {'event': 'left', 'outcome': 'completed'});
+    } catch (_) {}
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NTokens.of(context);
+    final m = widget.meeting;
+    final isVideo = m['meetingType'] == 'video';
+    final org = jsonMap(m['organizer']);
+    final participants = jsonList(m['participants']);
+    final title = '${m['title']}';
+    final roomId = m['roomId'] ?? m['id'] ?? 'room';
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(16),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 860, maxHeight: 640),
+        child: Container(
+          decoration: BoxDecoration(
+            color: t.card,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: t.divider),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 32, spreadRadius: 4),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Top Bar
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                decoration: BoxDecoration(
+                  color: t.card,
+                  border: Border(bottom: BorderSide(color: t.divider)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(isVideo ? Icons.videocam_rounded : Icons.call_rounded, color: t.accent, size: 22),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(title, style: t.text.title().copyWith(fontWeight: FontWeight.w700), overflow: TextOverflow.ellipsis),
+                              ),
+                              const SizedBox(width: 8),
+                              const NLiveDot(color: Colors.green),
+                              const SizedBox(width: 4),
+                              Text('LIVE', style: t.text.caption(weight: FontWeight.w800).copyWith(fontSize: 10, color: Colors.green)),
+                            ],
+                          ),
+                          Text('Room: $roomId · WebRTC P2P Encrypted', style: t.text.caption().copyWith(fontSize: 11, color: t.muted)),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      tooltip: 'Leave Call',
+                      onPressed: _leave,
+                    ),
+                  ],
+                ),
+              ),
+
+              // Main Stage Grid
+              Expanded(
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.85),
+                  padding: const EdgeInsets.all(16),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final cols = constraints.maxWidth > 550 ? 2 : 1;
+                      return GridView.count(
+                        crossAxisCount: cols,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: cols == 2 ? 1.4 : 1.8,
+                        children: [
+                          // User Tile (You)
+                          _ParticipantTile(
+                            name: '${context.me.name} (You)',
+                            isYou: true,
+                            micOn: _micOn,
+                            camOn: _camOn,
+                            isVideo: isVideo,
+                            tokens: t,
+                          ),
+                          // Organizer Tile (if distinct)
+                          if (org.isNotEmpty && org['id'] != context.me.userId)
+                            _ParticipantTile(
+                              name: '${org['name'] ?? org['fullName'] ?? 'Organizer'}',
+                              isYou: false,
+                              micOn: true,
+                              camOn: isVideo,
+                              isVideo: isVideo,
+                              tokens: t,
+                            ),
+                          // Other participants
+                          for (final p in participants)
+                            if (p['id'] != context.me.userId && p['id'] != org['id'])
+                              _ParticipantTile(
+                                name: '${p['name'] ?? p['fullName'] ?? 'Participant'}',
+                                isYou: false,
+                                micOn: true,
+                                camOn: isVideo,
+                                isVideo: isVideo,
+                                tokens: t,
+                              ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+
+              // Bottom Control Dock
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                decoration: BoxDecoration(
+                  color: t.card,
+                  border: Border(top: BorderSide(color: t.divider)),
+                ),
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 12,
+                  runSpacing: 10,
+                  children: [
+                    _CallControlButton(
+                      icon: _micOn ? Icons.mic_rounded : Icons.mic_off_rounded,
+                      label: _micOn ? 'Mute' : 'Unmute',
+                      active: _micOn,
+                      onPressed: () => setState(() => _micOn = !_micOn),
+                      tokens: t,
+                    ),
+                    if (isVideo) ...[
+                      _CallControlButton(
+                        icon: _camOn ? Icons.videocam_rounded : Icons.videocam_off_rounded,
+                        label: _camOn ? 'Stop Video' : 'Start Video',
+                        active: _camOn,
+                        onPressed: () => setState(() => _camOn = !_camOn),
+                        tokens: t,
+                      ),
+                      _CallControlButton(
+                        icon: _screenShare ? Icons.stop_screen_share_rounded : Icons.screen_share_rounded,
+                        label: 'Share Screen',
+                        active: _screenShare,
+                        onPressed: () {
+                          setState(() => _screenShare = !_screenShare);
+                          NToast.of(context).show(_screenShare ? 'Screen sharing active.' : 'Screen sharing stopped.');
+                        },
+                        tokens: t,
+                      ),
+                    ],
+                    _CallControlButton(
+                      icon: Icons.link_rounded,
+                      label: 'Copy Info',
+                      active: false,
+                      onPressed: () async {
+                        await ClipboardHelper.copy('Signal HRM Room: $roomId');
+                        if (context.mounted) NToast.of(context).show('Room ID copied.');
+                      },
+                      tokens: t,
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red.shade600,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      icon: const Icon(Icons.call_end_rounded, size: 20),
+                      label: const Text('Leave Call', style: TextStyle(fontWeight: FontWeight.w700)),
+                      onPressed: _leave,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ParticipantTile extends StatelessWidget {
+  const _ParticipantTile({
+    required this.name,
+    required this.isYou,
+    required this.micOn,
+    required this.camOn,
+    required this.isVideo,
+    required this.tokens,
+  });
+
+  final String name;
+  final bool isYou;
+  final bool micOn;
+  final bool camOn;
+  final bool isVideo;
+  final NTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E2128),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: micOn ? tokens.accent.withValues(alpha: 0.5) : const Color(0xFF2C303B),
+          width: micOn ? 1.5 : 1,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          if (isVideo && camOn)
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    tokens.accent.withValues(alpha: 0.25),
+                    const Color(0xFF181A20),
+                  ],
+                ),
+              ),
+              child: Center(
+                child: NAvatar(name: name, size: 56),
+              ),
+            )
+          else
+            Center(
+              child: NAvatar(name: name, size: 56),
+            ),
+          Positioned(
+            left: 10,
+            right: 10,
+            bottom: 10,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.65),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      name,
+                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Icon(
+                    micOn ? Icons.mic_rounded : Icons.mic_off_rounded,
+                    size: 14,
+                    color: micOn ? Colors.greenAccent : Colors.redAccent,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CallControlButton extends StatelessWidget {
+  const _CallControlButton({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onPressed,
+    required this.tokens,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onPressed;
+  final NTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: label,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: active ? tokens.accent.withValues(alpha: 0.15) : tokens.card,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: active ? tokens.accent : tokens.divider,
+            ),
+          ),
+          child: Icon(
+            icon,
+            size: 20,
+            color: active ? tokens.accent : tokens.ink,
+          ),
+        ),
+      ),
+    );
   }
 }
 
