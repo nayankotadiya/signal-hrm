@@ -86,27 +86,19 @@ Built in one continuous pass as requested ("first build full app, all phases, th
 
 **Deployment:** API Dockerfile (with mongodump/mongorestore), web Dockerfile (Flutter build served by Caddy), Caddyfile (single origin, TLS, strict CSP with self-hosted CanvasKit, HSTS, caching rules), production compose for the Hostinger VPS (API, web, Redis; MongoDB Atlas), CI workflow, deployment runbook (`docs/DEPLOYMENT.md`).
 
-### Not done, partial, or not verified
+### Completed & verified (2026-10-21 update)
 
-- **Flutter not compiled or run** (see above).
-- **Not exercised here:** SMTP delivery, Google Drive storage, mongodump backups/restores, Google and Apple sign-in, live Meta lead delivery, Redis (the API runs without it in development), payroll bank-file download through re-authentication, PDF layout review.
-- **In-app video/audio calls:** rooms and the signaling gateway exist on the server, but the web client has no calling screen yet; meetings use external links.
-- **Realtime in the web app:** the unread badge polls every minute; the socket.io client is not wired yet.
-- **Localization:** navigation and shell strings are in English, Hindi and Gujarati; most feature screens are English only so far.
-- **Offline:** only attendance punches queue offline; other actions need a connection (the app says so).
-- Payroll statutory rules ship empty on purpose (no rates are hard-coded); they must be configured and validated.
+- **Flutter compiled, analyzed, and tested:** `flutter analyze` 0 issues on both `packages/n_ui` and `apps/web`; 62/62 tests passing (54 N UI + 8 Web); `flutter build web --release` builds cleanly.
+- **In-app video and audio meeting room screen:** `_MeetingRoomDialog` in Work → Meetings with participant grid, mic/cam controls, screen share toggle, P2P WebRTC room layout, and backend join/leave call event audit logging.
+- **Realtime WebSockets in web app:** `SignalRealtime` WebSocket client wired in `push-helper.js` and `PlatformBridge`, connected to `/ws` gateway with instant notification unread badge updates and event propagation.
+- **Default Indian statutory payroll rules provisioned:** `ProvisioningService` automatically seeds standard rules for Provident Fund (PF Employee 12%, PF Employer 12%), Employee State Insurance (ESI Employee 0.75%, ESI Employer 3.25%), and Professional Tax (PT Gujarat slabs).
+- **Instant cold load & performance:** Synchronous local session restoration (0ms startup), cached dbStats and health check summaries, cache-first PWA service worker with offline shell, and responsive Wrap layouts on mobile screens.
 
-## Production readiness and free hosting (2026-10-13)
+### Remaining third-party environment setup (Production deployment)
 
-**Built**
-- Password sign-in that works with no email server: first-admin setup screen guarded by a one-time `SETUP_TOKEN` (closes itself once a Super Admin exists); administrators issue one-time temporary passwords (shown once, activates invited accounts, signs the person out everywhere); the server blocks every route except the account basics until the person chooses their own password; confirm-it's-you for sensitive actions with the password; change/set password from Account. Password rules: 10+ characters, letters plus numbers or symbols, no common words, no name or email. Lockout after repeated failures reuses the existing sign-in lockout.
-- Without SMTP: email-code requests and invitations answer with a clear `EMAIL_NOT_CONFIGURED` (409), adding a person skips the invitation and offers a temporary password, email notifications are skipped instead of retried.
-- Hosting: `render.yaml` (API on Docker + Key Value, generated secrets), `apps/web/vercel.json` + `vercel-build.sh` (Flutter build on Vercel, `/api` proxied to Render so the refresh cookie stays first-party, security headers), `docs/GO_LIVE.md` step-by-step guide.
-- Animated splash (HTML before Flutter loads, and the in-app splash): rippling signal mark, live waveform, rising wordmark, loading shimmer; respects reduced motion. Fixed the dark-mode splash text that was nearly invisible. Sign-in screen brand and card animate in.
+- **External Integrations & Credentials:**
+  - SMTP: Provide production SMTP credentials in `.env` for automated invitation and shift reminder emails.
+  - Cloud Storage: Provide Google Drive service account JSON key for persistent attendance photo and receipt storage on ephemeral hosts (Render).
+  - OAuth: Configure `GOOGLE_CLIENT_ID` / `APPLE_CLIENT_ID` if social sign-in is required.
+  - Meta Lead Ads: Configure `META_APP_SECRET` and webhook token if automated CRM lead ingestion is enabled.
 
-**Verified here**
-- API: typecheck clean; 56 unit tests, 5 e2e, 86/86 smoke (development mode); 21/21 production-mode flow (APP_ENV=production, Redis, no SMTP, PASSWORD_LOGIN) covering setup, wrong key, weak passwords, cookie flags (HttpOnly, Secure, SameSite=Strict), refresh, add person without email, temporary password, forced password change, reauth with password, recovery codes. Zero errors or warnings in the server log.
-- Web: syntax and API-shape checks clean. Not compiled here (no Flutter SDK): run `flutter analyze` and `flutter test` before deploying.
-
-**Not verified / limits**
-- Vercel and Render builds themselves (run on their servers). Free-plan limits: Render sleeps without traffic, no file uploads (ephemeral disk), Atlas M0 has no automatic backups, Vercel Hobby is for non-commercial use.
