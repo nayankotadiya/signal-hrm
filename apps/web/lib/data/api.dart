@@ -197,7 +197,7 @@ class ApiClient {
         if (savedRt != null && savedRt.isNotEmpty) {
           req.body = jsonEncode({'refreshToken': savedRt});
         }
-        final res = await http.Response.fromStream(await _client.send(req).timeout(const Duration(seconds: 30)));
+        final res = await http.Response.fromStream(await _client.send(req).timeout(const Duration(seconds: 6)));
         if (res.statusCode != 200) {
           // Only clear stored session on definitive auth rejection (401 / 403).
           // Temporary server wakeup / cold start (5xx) must NOT wipe the user's session!

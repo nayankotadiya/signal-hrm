@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:n_ui/n_ui.dart';
@@ -12,6 +14,7 @@ import '../features/notifications/notifications_page.dart';
 import '../shell/app_shell.dart';
 import '../widgets/brand.dart';
 import 'destinations.dart';
+import 'services.dart';
 import 'session.dart';
 
 /// Clean URLs with deep links. Sibling destinations live in one StatefulShellRoute whose branch
@@ -89,11 +92,44 @@ GoRouter buildRouter({
   );
 }
 
-class SplashPage extends StatelessWidget {
+class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
 
   @override
+  State<SplashPage> createState() => _SplashPageState();
+}
+
+class _SplashPageState extends State<SplashPage> {
+  Timer? _hintTimer;
+  Timer? _timeoutTimer;
+  bool _showHint = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // After 2.5s, display friendly status and escape button
+    _hintTimer = Timer(const Duration(milliseconds: 2500), () {
+      if (mounted) setState(() => _showHint = true);
+    });
+    // After 5s, automatically escape the splash screen and transition to login
+    _timeoutTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) {
+        context.services.session.forceSignedOut();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _hintTimer?.cancel();
+    _timeoutTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final t = NTokens.of(context);
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: NPageBackground(
@@ -101,13 +137,32 @@ class SplashPage extends StatelessWidget {
           child: Semantics(
             label: 'Loading Signal HRM — Bulletproof Brands',
             // Continues the HTML splash (same mark, rings and shimmer) while the session restores.
-            child: const Column(mainAxisSize: MainAxisSize.min, children: [
-              SignalMark(size: 64),
-              SizedBox(height: 22),
-              SignalWordmark(size: 28),
-              SizedBox(height: 22),
-              SignalLoadingBar(),
-            ]),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SignalMark(size: 64),
+                const SizedBox(height: 22),
+                const SignalWordmark(size: 28),
+                const SizedBox(height: 22),
+                const SignalLoadingBar(),
+                if (_showHint) ...[
+                  const SizedBox(height: 24),
+                  Text(
+                    'Connecting to server...',
+                    style: t.text.caption(color: t.muted),
+                  ),
+                  const SizedBox(height: 12),
+                  NButton(
+                    label: 'Go to Sign In',
+                    variant: NButtonVariant.secondary,
+                    icon: Icons.login_rounded,
+                    onPressed: () {
+                      context.services.session.forceSignedOut();
+                    },
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),
