@@ -102,3 +102,28 @@ Built in one continuous pass as requested ("first build full app, all phases, th
   - OAuth: Configure `GOOGLE_CLIENT_ID` / `APPLE_CLIENT_ID` if social sign-in is required.
   - Meta Lead Ads: Configure `META_APP_SECRET` and webhook token if automated CRM lead ingestion is enabled.
 
+---
+
+## Phase 14: Android APK Build, Simulator Deployment & Verification (21 Oct 2026)
+
+Built, deployed, and verified the native Android mobile application in the Android Emulator (`Medium_Phone_API_36.1` / Android 16 API 36).
+
+### Key Accomplishments & Fixes
+
+1. **Android Platform Generation & Toolchain Setup:**
+   - Generated native Android project files for `apps/web` with package ID `com.bulletproof.signal_hrm`.
+   - Configured `AndroidManifest.xml` with permissions: `INTERNET`, `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `CAMERA`, and enabled `android:usesCleartextTraffic="true"`.
+   - Setup Android SDK cmdline tools, platform tools (`adb`), accepted Android licenses, and configured Gradle Kotlin DSL build scripts (`build.gradle.kts`).
+2. **Storage Management:**
+   - Cleaned temporary caches to free Drive `C:` space and redirected `GRADLE_USER_HOME="D:\.gradle"` to prevent native library merge disk-exhaustion crashes.
+3. **Emulator-Specific Network & Fallback Bridges:**
+   - Updated `AppConfig.apiBaseUrl` to automatically resolve `localhost` / `127.0.0.1` to the Android emulator host loopback `10.0.2.2`.
+   - Guarded `usePathUrlStrategy()` with `kIsWeb` to prevent web-plugin crashes on mobile runtimes.
+   - Enhanced `StubBridge` with bundled demo assets (`assets/demo/selfie.jpg` and geofence coordinates) for offline mobile verification.
+4. **End-to-End Verification in Simulator:**
+   - Successfully built `build\app\outputs\flutter-apk\app-debug.apk`.
+   - Installed and launched on `emulator-5554`.
+   - Verified Dashboard, Attendance Punch In/Out (with camera viewfinder & selfie photo confirmation), Time tracking calendar, Work board (Tasks, Meetings), People directory, and Money (Payroll & Indian Statutory Rules modal).
+   - Inspected runtime logs via `adb logcat`: Impeller rendering engine active, 0 errors, 0 exceptions.
+
+
