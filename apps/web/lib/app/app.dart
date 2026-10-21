@@ -53,6 +53,7 @@ class _SignalAppState extends State<SignalApp> {
       if (ctx == null) return false;
       return showReauthDialog(ctx, _services.api, usePassword: _session.me?.hasPassword ?? false);
     };
+    _session.loadCached();
     _rebuildRouter();
     _session.restore();
   }

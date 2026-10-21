@@ -348,9 +348,11 @@ class _LoginPageState extends State<LoginPage> {
                     : null,
               ),
               const SizedBox(width: 10),
-              Text(
-                'Keep me signed in',
-                style: t.text.body(color: t.ink, weight: FontWeight.w500).copyWith(fontSize: 14),
+              Flexible(
+                child: Text(
+                  'Keep me signed in',
+                  style: t.text.body(color: t.ink, weight: FontWeight.w500).copyWith(fontSize: 14),
+                ),
               ),
             ],
           ),

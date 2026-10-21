@@ -17,13 +17,14 @@ void showError(BuildContext context, Object e) {
 /// Loads data once (and again on [reloadKey] change or [AsyncViewState.reload]). Loading shows a
 /// skeleton, failures show the error with retry, and the builder only ever sees real data.
 class AsyncView<T> extends StatefulWidget {
-  const AsyncView({super.key, required this.load, required this.builder, this.reloadKey, this.skeletonRows = 4, this.compact = false});
+  const AsyncView({super.key, required this.load, required this.builder, this.reloadKey, this.skeletonRows = 4, this.compact = false, this.initialData});
 
   final Future<T> Function() load;
   final Widget Function(BuildContext context, T data, Future<void> Function() reload) builder;
   final Object? reloadKey;
   final int skeletonRows;
   final bool compact;
+  final T? initialData;
 
   @override
   State<AsyncView<T>> createState() => AsyncViewState<T>();
@@ -38,7 +39,9 @@ class AsyncViewState<T> extends State<AsyncView<T>> {
   @override
   void initState() {
     super.initState();
-    reload();
+    _data = widget.initialData;
+    _loading = _data == null;
+    reload(showSkeleton: false);
   }
 
   @override

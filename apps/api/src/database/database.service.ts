@@ -79,6 +79,8 @@ export class DatabaseService implements OnModuleInit, OnApplicationShutdown {
     await this.conn.db.admin().command({ ping: 1 });
   }
 
+  private cachedStorageStats?: { stats: any; expiresAt: number };
+
   /**
    * Queries dbStats to monitor MongoDB Atlas storage capacity.
    * Calculates storage usage and whether it exceeds the 90% threshold.
@@ -92,6 +94,10 @@ export class DatabaseService implements OnModuleInit, OnApplicationShutdown {
     percentUsed: number;
     isAbove90Percent: boolean;
   }> {
+    const now = Date.now();
+    if (this.cachedStorageStats && now < this.cachedStorageStats.expiresAt) {
+      return this.cachedStorageStats.stats;
+    }
     if (!this.conn?.db) {
       return { dataSizeMb: 0, storageSizeMb: 0, indexSizeMb: 0, totalSizeMb: 0, limitMb: this.env.MONGODB_STORAGE_LIMIT_MB ?? 512, percentUsed: 0, isAbove90Percent: false };
     }
@@ -110,7 +116,7 @@ export class DatabaseService implements OnModuleInit, OnApplicationShutdown {
       const percentUsed = limitMb > 0 ? Math.min(100, Math.round((usedMb / limitMb) * 1000) / 10) : 0;
       const isAbove90Percent = percentUsed >= 90;
 
-      return {
+      const result = {
         dataSizeMb,
         storageSizeMb,
         indexSizeMb,
@@ -119,6 +125,8 @@ export class DatabaseService implements OnModuleInit, OnApplicationShutdown {
         percentUsed,
         isAbove90Percent,
       };
+      this.cachedStorageStats = { stats: result, expiresAt: now + 60_000 };
+      return result;
     } catch {
       return { dataSizeMb: 0, storageSizeMb: 0, indexSizeMb: 0, totalSizeMb: 0, limitMb: this.env.MONGODB_STORAGE_LIMIT_MB ?? 512, percentUsed: 0, isAbove90Percent: false };
     }

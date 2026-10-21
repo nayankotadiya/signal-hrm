@@ -338,16 +338,22 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 6,
             children: [
               Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.schedule_rounded, size: 16, color: t.accent),
                   const SizedBox(width: 6),
-                  Text(
-                    'Shift Schedule',
-                    style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.ink),
+                  Flexible(
+                    child: Text(
+                      'Shift Schedule',
+                      style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.ink),
+                    ),
                   ),
                 ],
               ),
@@ -460,9 +466,12 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
             const SizedBox(height: 12),
             const Divider(height: 1),
             const SizedBox(height: 10),
-            Row(
+            Wrap(
+              spacing: 16,
+              runSpacing: 10,
               children: [
-                Expanded(
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: 80),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -489,9 +498,8 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                     ],
                   ),
                 ),
-                Container(width: 1, height: 32, color: t.divider),
-                const SizedBox(width: 12),
-                Expanded(
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: 80),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -518,10 +526,9 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                     ],
                   ),
                 ),
-                if (workedMins > 0) ...[
-                  Container(width: 1, height: 32, color: t.divider),
-                  const SizedBox(width: 12),
-                  Expanded(
+                if (workedMins > 0)
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 80),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -535,7 +542,6 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                       ],
                     ),
                   ),
-                ],
               ],
             ),
           ],
@@ -572,10 +578,11 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                Wrap(
+                  spacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text(title, style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.ink)),
-                    const SizedBox(width: 6),
                     Text('($duration)', style: t.text.caption().copyWith(fontSize: 10, color: t.muted)),
                   ],
                 ),
@@ -606,6 +613,16 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     );
   }
 
+  static Json? _loadCached() {
+    try {
+      final raw = bridge.readLocal('shrm_attendance_today_cache');
+      if (raw != null && raw.isNotEmpty) {
+        return (jsonDecode(raw) as Map).cast<String, dynamic>();
+      }
+    } catch (_) {}
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = NTokens.of(context);
@@ -615,7 +632,14 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
       blur: false,
       child: AsyncView<Json>(
         key: _view,
-        load: () async => jsonMap(await context.api.get('/attendance/today')),
+        initialData: _loadCached(),
+        load: () async {
+          final res = jsonMap(await context.api.get('/attendance/today'));
+          try {
+            bridge.writeLocal('shrm_attendance_today_cache', jsonEncode(res));
+          } catch (_) {}
+          return res;
+        },
         compact: true,
         builder: (context, today, reload) {
           final state = '${today['state']}';
@@ -638,9 +662,9 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
             _Phase.selfie => 'Waiting for photo…',
             _Phase.sending => 'Recording punch…',
             _Phase.idle => switch (state) {
-                'not_checked_in' => 'Check In',
-                'checked_in' => 'Check Out',
-                _ => 'Check In (Resume Work)',
+                'not_checked_in' => 'Check in',
+                'checked_in' => 'Check out',
+                _ => 'Check in (Resume Work)',
               },
           };
 

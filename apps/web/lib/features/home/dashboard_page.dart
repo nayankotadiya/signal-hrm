@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:n_ui/n_ui.dart';
@@ -5,6 +7,7 @@ import 'package:n_ui/n_ui.dart';
 import '../../app/links.dart';
 import '../../app/services.dart';
 import '../../data/api.dart';
+import '../../platform/bridge.dart';
 import '../../shell/app_shell.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/format.dart';
@@ -24,6 +27,16 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   final _view = GlobalKey<AsyncViewState<Json>>();
 
+  static Json? _loadCached() {
+    try {
+      final raw = bridge.readLocal('shrm_dashboard_cache');
+      if (raw != null && raw.isNotEmpty) {
+        return (jsonDecode(raw) as Map).cast<String, dynamic>();
+      }
+    } catch (_) {}
+    return null;
+  }
+
   String _greeting() {
     final h = DateTime.now().hour;
     return h < 12 ? 'Good morning,' : (h < 17 ? 'Good afternoon,' : 'Good evening,');
@@ -35,7 +48,14 @@ class _DashboardPageState extends State<DashboardPage> {
     return PageFrame(
       child: AsyncView<Json>(
         key: _view,
-        load: () async => jsonMap(await context.api.get('/dashboard')),
+        initialData: _loadCached(),
+        load: () async {
+          final res = jsonMap(await context.api.get('/dashboard'));
+          try {
+            bridge.writeLocal('shrm_dashboard_cache', jsonEncode(res));
+          } catch (_) {}
+          return res;
+        },
         skeletonRows: 8,
         builder: (context, d, reload) {
           final mine = d['me'] == null ? null : jsonMap(d['me']);

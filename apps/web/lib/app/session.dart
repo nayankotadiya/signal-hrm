@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 
 import '../data/api.dart';
@@ -88,7 +90,12 @@ class SessionController extends ChangeNotifier {
   Me? get me => _me;
   PermissionSet get permissions => _me?.permissions ?? PermissionSet.empty;
 
-  void _apply(Json me) {
+  void _apply(Json me, {bool persist = true}) {
+    if (persist) {
+      try {
+        bridge.writeLocal('shrm_me', jsonEncode(me));
+      } catch (_) {}
+    }
     final next = Me(me);
     final changed = _me == null || _me!.permissions.signature != next.permissions.signature || _me!.raw['user'].toString() != next.raw['user'].toString() || _me!.features.toString() != next.features.toString();
     _me = next;
@@ -96,21 +103,24 @@ class SessionController extends ChangeNotifier {
     if (changed) notifyListeners();
   }
 
-  Future<void> restore() async {
-    final savedRt = bridge.readLocal('shrm_rt');
-    if (savedRt == null || savedRt.isEmpty) {
-      if (_status == SessionStatus.unknown) {
-        _status = SessionStatus.signedOut;
-        notifyListeners();
-      }
-      return;
+  /// Fast-path: synchronously restore cached user profile before building initial router
+  /// so the app immediately renders the dashboard in 0ms on startup.
+  void loadCached() {
+    final savedMe = bridge.readLocal('shrm_me');
+    if (savedMe != null && savedMe.isNotEmpty) {
+      try {
+        final decoded = (jsonDecode(savedMe) as Map).cast<String, dynamic>();
+        _me = Me(decoded);
+        _status = SessionStatus.signedIn;
+      } catch (_) {}
     }
+  }
+
+  Future<void> restore() async {
     final ok = await api.refresh();
     if (!ok && _status == SessionStatus.unknown) {
-      if (bridge.readLocal('shrm_rt') == null) {
-        _status = SessionStatus.signedOut;
-        notifyListeners();
-      }
+      _status = SessionStatus.signedOut;
+      notifyListeners();
     }
   }
 
@@ -151,6 +161,7 @@ class SessionController extends ChangeNotifier {
 
   Future<void> signOut() async {
     bridge.writeLocal('shrm_rt', null);
+    bridge.writeLocal('shrm_me', null);
     try {
       await api.post('/auth/logout');
     } catch (_) {

@@ -17,6 +17,15 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="manifest" href="manifest.json">
   <title>Signal HRM</title>
+  <link rel="preconnect" href="https://signal-hrm-api.onrender.com" crossorigin>
+  <link rel="dns-prefetch" href="https://signal-hrm-api.onrender.com">
+  <script>
+    // Asynchronously pre-warm the backend API as soon as HTML arrives
+    // so server wake-up/handshake occurs in parallel with Flutter boot
+    try {
+      fetch('/api/v1/health/live', { priority: 'low' }).catch(function () {});
+    } catch (_) {}
+  </script>
   <style>
     /* Animated splash in the N UI gradient, shown while the app downloads. It fades out on
        Flutter's first frame, and the app's own splash continues the same animation. */
