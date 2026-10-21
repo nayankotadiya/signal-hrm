@@ -6,6 +6,7 @@ analyzer:
     - build/**
     - web/**
     - android/**
+    - ios/**
   language:
     strict-casts: true
     strict-raw-types: true
