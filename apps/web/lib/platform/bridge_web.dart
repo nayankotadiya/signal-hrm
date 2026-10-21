@@ -59,6 +59,12 @@ external JSPromise<JSBoolean> _signalPushIsSubscribed();
 @JS('SignalPush.unsubscribe')
 external JSPromise<JSObject?> _signalPushUnsubscribe(JSString apiBaseUrl, JSString token);
 
+@JS('SignalRealtime.connect')
+external void _signalRealtimeConnect(JSString apiBaseUrl, JSString token, JSFunction onEvent);
+
+@JS('SignalRealtime.disconnect')
+external void _signalRealtimeDisconnect();
+
 class WebBridge implements PlatformBridge {
   WebBridge() {
     web.window.addEventListener('online', ((web.Event _) => _online.add(true)).toJS);
@@ -287,5 +293,20 @@ class WebBridge implements PlatformBridge {
   @override
   void openUrl(String url) {
     web.window.open(url, '_blank');
+  }
+
+  @override
+  void connectRealtime(String apiBaseUrl, String token, void Function(String event, String payloadJson) onEvent) {
+    try {
+      final jsCb = ((JSString e, JSString p) => onEvent(e.toDart, p.toDart)).toJS;
+      _signalRealtimeConnect(apiBaseUrl.toJS, token.toJS, jsCb);
+    } catch (_) {}
+  }
+
+  @override
+  void disconnectRealtime() {
+    try {
+      _signalRealtimeDisconnect();
+    } catch (_) {}
   }
 }

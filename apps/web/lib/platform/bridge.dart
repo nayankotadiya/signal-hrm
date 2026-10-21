@@ -67,6 +67,12 @@ abstract class PlatformBridge {
 
   /// Opens an external URL in a new tab or browser window.
   void openUrl(String url);
+
+  /// Connects to the backend WebSocket/Socket.IO gateway for real-time notifications and updates.
+  void connectRealtime(String apiBaseUrl, String token, void Function(String event, String payloadJson) onEvent);
+
+  /// Disconnects the real-time WebSocket connection.
+  void disconnectRealtime();
 }
 
 final PlatformBridge bridge = impl.create();

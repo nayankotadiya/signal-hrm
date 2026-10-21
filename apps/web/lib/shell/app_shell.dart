@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/foundation.dart';
@@ -38,14 +39,37 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshUnread());
-    // Unread count: polled every minute (and after opening the notification center).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshUnread();
+      final token = context.api.token;
+      if (token != null && token.isNotEmpty) {
+        bridge.connectRealtime(context.api.baseUrl, token, _onRealtimeEvent);
+      }
+    });
+    // Fallback unread count poll every 60 seconds
     _poll = Timer.periodic(const Duration(seconds: 60), (_) => _refreshUnread());
+  }
+
+  void _onRealtimeEvent(String event, String payloadJson) {
+    if (!mounted) return;
+    if (event == 'notification' || event == 'notification:unread') {
+      try {
+        final data = jsonDecode(payloadJson);
+        if (data is Map && data['unread'] is num) {
+          _unread.value = (data['unread'] as num).toInt();
+        } else {
+          _refreshUnread();
+        }
+      } catch (_) {
+        _refreshUnread();
+      }
+    }
   }
 
   @override
   void dispose() {
     _poll?.cancel();
+    bridge.disconnectRealtime();
     super.dispose();
   }
 

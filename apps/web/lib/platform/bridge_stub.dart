@@ -56,4 +56,10 @@ class StubBridge implements PlatformBridge {
 
   @override
   void openUrl(String url) {}
+
+  @override
+  void connectRealtime(String apiBaseUrl, String token, void Function(String event, String payloadJson) onEvent) {}
+
+  @override
+  void disconnectRealtime() {}
 }

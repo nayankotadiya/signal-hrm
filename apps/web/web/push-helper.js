@@ -116,6 +116,49 @@
     }
   };
 
+  window.SignalRealtime = {
+    socket: null,
+    connect: function (apiBaseUrl, token, onEvent) {
+      if (this.socket) {
+        try { this.socket.close(); } catch (_) {}
+        this.socket = null;
+      }
+      if (!token) return;
+      try {
+        var base = apiBaseUrl.replace(/\/v1\/?$/, '').replace(/\/api\/?$/, '');
+        var wsUrl = base.replace(/^http/, 'ws') + '/ws/?EIO=4&transport=websocket';
+        var ws = new WebSocket(wsUrl);
+        this.socket = ws;
+        ws.onopen = function () {
+          ws.send('40{"token":"' + token + '"}');
+        };
+        ws.onmessage = function (e) {
+          var msg = e.data;
+          if (msg === '2') {
+            ws.send('3'); // pong
+            return;
+          }
+          if (typeof msg === 'string' && msg.indexOf('42') === 0) {
+            try {
+              var arr = JSON.parse(msg.slice(2));
+              var eventName = arr[0];
+              var payload = JSON.stringify(arr[1] || {});
+              if (onEvent) onEvent(eventName, payload);
+            } catch (_) {}
+          }
+        };
+      } catch (err) {
+        console.warn('[SignalRealtime] Connect error:', err);
+      }
+    },
+    disconnect: function () {
+      if (this.socket) {
+        try { this.socket.close(); } catch (_) {}
+        this.socket = null;
+      }
+    }
+  };
+
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       window.SignalPush.registerServiceWorker();
