@@ -15,6 +15,7 @@ import '../../widgets/async_view.dart';
 import '../../widgets/authed_image.dart';
 import '../../widgets/format.dart';
 import '../../widgets/geofence_map.dart';
+import '../../widgets/set_office_location_dialog.dart';
 import '../../widgets/status.dart';
 
 class _CapturedSelfie {
@@ -416,6 +417,20 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
         _refreshingLocation = false;
       });
       NToast.of(context).show(msg);
+    }
+  }
+
+  Future<void> _openSetOfficeLocation(Json loc, Json today) async {
+    final updated = await showSetOfficeLocationSheet(
+      context,
+      location: loc,
+      onLocationUpdated: () {
+        _view.currentState?.reload();
+      },
+    );
+    if (updated != null && mounted) {
+      _view.currentState?.reload();
+      _refreshCurrentLocation(today);
     }
   }
 
@@ -1537,6 +1552,27 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                                   ),
                                 ),
                               ),
+                              InkWell(
+                                onTap: () => _openSetOfficeLocation(loc, today),
+                                borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.edit_location_alt_outlined, size: 14, color: t.accent),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Set Office',
+                                        style: t.text.caption(weight: FontWeight.w700).copyWith(
+                                              color: t.accent,
+                                              fontSize: 11,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
                         ],
@@ -1650,7 +1686,7 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                           officeLat: (loc['latitude'] as num?)?.toDouble() ?? 23.0225,
                           officeLng: (loc['longitude'] as num?)?.toDouble() ?? 72.5714,
                           officeRadiusMeters: (loc['radiusMeters'] as num?)?.toDouble() ?? 100.0,
-                          officeName: loc['name'] as String? ?? 'Main Office',
+                          officeName: loc['name'] as String? ?? 'Bulletproof Brands HQ',
                           officeAddress: loc['address'] as String?,
                           userLat: _lastFix?.latitude,
                           userLng: _lastFix?.longitude,
@@ -1658,7 +1694,8 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                           isInside: _isInsideGeofence,
                           isRefreshing: _refreshingLocation,
                           onRefresh: () => _refreshCurrentLocation(today),
-                          height: 220,
+                          onSetOfficeLocation: () => _openSetOfficeLocation(loc, today),
+                          height: 230,
                         ),
                       ],
                     ],
@@ -1748,7 +1785,7 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
               ],
 
               // Footer helper details
-              if (!isCheckedOut)
+              if (!isCheckedOut) ...[
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Row(
@@ -1767,6 +1804,8 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                     ],
                   ),
                 ),
+                if (isMobile) const SizedBox(height: 14),
+              ],
             ],
           );
         },

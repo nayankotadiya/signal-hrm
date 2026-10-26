@@ -479,6 +479,53 @@ class DemoBackend {
       return _json(org ?? {'id': 'demo-org', ...body});
     }
 
+    if (path.startsWith('/locations') && (method == 'POST' || method == 'PATCH' || method == 'PUT')) {
+      final locs = _fixtures['GET /locations'] as Map<String, dynamic>?;
+      final rawItems = locs?['items'] as List? ?? [];
+      final items = rawItems.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+      Map<String, dynamic> updatedItem;
+      if (path == '/locations' && method == 'POST') {
+        updatedItem = {
+          'id': 'loc-${DateTime.now().millisecondsSinceEpoch}',
+          'name': body['name'] ?? 'Office',
+          'address': body['address'] ?? '',
+          'latitude': (body['latitude'] as num?)?.toDouble() ?? 23.0225,
+          'longitude': (body['longitude'] as num?)?.toDouble() ?? 72.5714,
+          'radiusMeters': (body['radiusMeters'] as num?)?.toInt() ?? 150,
+          'active': body['active'] != false,
+          'employeeCount': 12,
+        };
+        items.add(updatedItem);
+      } else {
+        final id = path.substring('/locations/'.length);
+        final idx = items.indexWhere((l) => l['id'] == id);
+        if (idx >= 0) {
+          items[idx] = {...items[idx], ...body};
+          updatedItem = items[idx];
+        } else {
+          updatedItem = {'id': id, ...body};
+          items.add(updatedItem);
+        }
+      }
+      if (locs != null) locs['items'] = items;
+
+      final today = _fixtures['GET /attendance/today'] as Map<String, dynamic>?;
+      if (today != null) {
+        final curLoc = Map<String, dynamic>.from(today['location'] as Map? ?? {});
+        today['location'] = {
+          ...curLoc,
+          if (updatedItem['name'] != null) 'name': updatedItem['name'],
+          if (updatedItem['address'] != null) 'address': updatedItem['address'],
+          if (updatedItem['latitude'] != null) 'latitude': updatedItem['latitude'],
+          if (updatedItem['longitude'] != null) 'longitude': updatedItem['longitude'],
+          if (updatedItem['radiusMeters'] != null) 'radiusMeters': updatedItem['radiusMeters'],
+        };
+      }
+
+      return _json(updatedItem, method == 'POST' ? 201 : 200);
+    }
+
     if (method == 'DELETE') return http.Response('', 204);
     return _json({'id': 'demo-${DateTime.now().microsecondsSinceEpoch}', 'status': 'pending', ...body, 'demo': true}, method == 'POST' ? 201 : 200);
   }

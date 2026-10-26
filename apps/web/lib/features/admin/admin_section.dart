@@ -4,11 +4,11 @@ import 'package:n_ui/n_ui.dart';
 import '../../app/services.dart';
 import '../../data/api.dart';
 import '../../data/lookups.dart';
-import '../../platform/bridge.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/form_kit.dart';
 import '../../widgets/format.dart';
 import '../../widgets/section.dart';
+import '../../widgets/set_office_location_dialog.dart';
 import '../../widgets/status.dart';
 import '../approvals/approvals_page.dart' show requestTypeLabels;
 import '../auth/password_pages.dart' show issueTemporaryPassword;
@@ -339,40 +339,11 @@ class _LocationsTabState extends State<LocationsTab> {
   int _rev = 0;
 
   Future<void> _edit([Json? l]) async {
-    final api = context.api;
-    final r = await showFormSheet<Json>(
+    final r = await showSetOfficeLocationSheet(
       context,
-      title: l == null ? 'New location' : 'Edit ${l['name']}',
-      initial: l ?? const {'radiusMeters': 150, 'active': true},
-      header: Align(
-        alignment: AlignmentDirectional.centerStart,
-        child: TextButton.icon(
-          icon: const Icon(Icons.my_location_rounded, size: 18),
-          label: const Text('Copy my current position to the clipboard'),
-          onPressed: () async {
-            try {
-              final g = await bridge.currentPosition();
-              if (!mounted) return;
-              NToast.of(context).show('You are at ${g.latitude.toStringAsFixed(6)}, ${g.longitude.toStringAsFixed(6)} (±${g.accuracyMeters.round()} m). Enter these as latitude and longitude.');
-            } catch (_) {
-              if (mounted) NToast.of(context).show("Couldn't read your location. Allow location access and try again.");
-            }
-          },
-        ),
-      ),
-      fields: const [
-        FieldSpec('name', 'Name', required: true),
-        FieldSpec('address', 'Address', kind: FieldKind.multiline),
-        FieldSpec('latitude', 'Latitude', kind: FieldKind.number, required: true, min: -90, max: 90, hint: '23.022505'),
-        FieldSpec('longitude', 'Longitude', kind: FieldKind.number, required: true, min: -180, max: 180, hint: '72.571362'),
-        FieldSpec('radiusMeters', 'Allowed radius (metres)', kind: FieldKind.number, required: true, min: 10, max: 5000),
-        FieldSpec('timezone', 'Time zone (if different)', hint: 'Asia/Kolkata'),
-        FieldSpec('active', 'Active', kind: FieldKind.toggle),
-      ],
-      successMessage: 'Location saved.',
-      submit: (v, key) async {
-        final body = {...v, 'radiusMeters': (v['radiusMeters'] as num?)?.round(), 'active': v['active'] == true};
-        return jsonMap(l == null ? await api.post('/locations', body: body, idempotencyKey: key) : await api.patch('/locations/${l['id']}', body: body, idempotencyKey: key));
+      location: l ?? const {'radiusMeters': 150, 'active': true},
+      onLocationUpdated: () {
+        if (mounted) setState(() => _rev++);
       },
     );
     if (!mounted) return;

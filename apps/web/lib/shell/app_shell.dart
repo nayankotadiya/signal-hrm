@@ -247,23 +247,22 @@ class _TopBar extends StatelessWidget {
     final prefs = PreferencesScope.of(context);
     final dark = t.isDark;
     final me = context.maybeMe;
+    final gap = bp.isMobile ? 4.0 : 8.0;
 
     final actions = Row(mainAxisSize: MainAxisSize.min, children: [
-      if (!bp.isMobile) ...[
-        NIconButton(
-          icon: dark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-          label: dark ? l.topThemeToLight : l.topThemeToDark,
-          onPressed: () => prefs.update((p) => p.copyWith(appearance: dark ? NAppearance.light : NAppearance.dark)),
-        ),
-        const SizedBox(width: 8),
-      ],
+      NIconButton(
+        icon: dark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+        label: dark ? l.topThemeToLight : l.topThemeToDark,
+        onPressed: () => prefs.update((p) => p.copyWith(appearance: dark ? NAppearance.light : NAppearance.dark)),
+      ),
+      SizedBox(width: gap),
       NIconButton(icon: Icons.search_rounded, label: l.topSearchHint, onPressed: onSearch),
-      const SizedBox(width: 8),
+      SizedBox(width: gap),
       ValueListenableBuilder<int>(
         valueListenable: unread,
         builder: (context, n, _) => NIconButton(icon: Icons.notifications_none_rounded, label: l.topNotifications, badgeCount: n, onPressed: onNotifications),
       ),
-      const SizedBox(width: 8),
+      SizedBox(width: gap),
       Tooltip(
         message: l.topAccount,
         child: Semantics(
@@ -272,7 +271,7 @@ class _TopBar extends StatelessWidget {
           child: InkWell(
             customBorder: const CircleBorder(),
             onTap: () => context.go('/account'),
-            child: NAvatar(name: me?.name ?? '?', size: 40),
+            child: NAvatar(name: me?.name ?? '?', size: bp.isMobile ? 36 : 40),
           ),
         ),
       ),
@@ -444,7 +443,7 @@ class PageFrame extends StatelessWidget {
         mobile ? 12 : 22,
         mobile ? 14 : 16,
         mobile ? 12 : 22,
-        (mobile ? 120 : 22) + MediaQuery.paddingOf(context).bottom,
+        (mobile ? 135 : 22) + MediaQuery.paddingOf(context).bottom,
       ),
       child: Center(
         child: ConstrainedBox(
