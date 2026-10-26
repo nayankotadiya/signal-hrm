@@ -36,6 +36,7 @@ class DemoBackend {
       'verification': 'within_radius',
       'deviceId': 'demo-device-1',
       'ip': '127.0.0.1',
+      'address': body['address'] ?? 'Bulletproof Brands HQ, S.G. Highway, Bodakdev, Ahmedabad',
       'selfieFileId': body['selfieFileId'] ?? 'file-demo-selfie',
       'queuedOffline': false,
     };
@@ -291,7 +292,11 @@ class DemoBackend {
       if (hit != null) return _json(hit);
       final found = _findInParentList(path);
       if (found != null) return _json(found);
-      if (path.endsWith('/content') || path.contains('/export') || path.endsWith('/bank-file')) {
+      if (path.endsWith('/content')) {
+        final byteData = await rootBundle.load('assets/demo/selfie.jpg');
+        return http.Response.bytes(byteData.buffer.asUint8List(), 200, headers: {'content-type': 'image/jpeg'});
+      }
+      if (path.contains('/export') || path.endsWith('/bank-file')) {
         return _error(404, 'DEMO_UNAVAILABLE', 'Downloads are not available in demo mode.');
       }
       return _json(_emptyPage);

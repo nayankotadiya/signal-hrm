@@ -25,6 +25,7 @@ export const punchInput = z.object({
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
   accuracyMeters: z.number().min(0).max(100_000).optional(),
+  address: z.string().trim().max(500).optional(),
   /** What the browser reported when asked for location. */
   locationStatus: z.enum(['granted', 'denied', 'unavailable', 'timeout', 'not_requested']).default('not_requested'),
   selfieFileId: z.string().optional(),
@@ -126,7 +127,7 @@ export class AttendanceService implements OnModuleInit {
       })(),
       dayCount: record?.dayCount ?? (record?.checkOut ? (record?.status === 'half_day' ? 0.5 : 1.0) : (record?.checkIn ? 0.5 : 0.0)),
       shift: shift ? { ...serialize(shift), lengthMinutes: shiftLength(shift) } : null,
-      location: location ? { id: String(location._id), name: location.name, latitude: location.latitude, longitude: location.longitude, radiusMeters: location.radiusMeters } : null,
+      location: location ? { id: String(location._id), name: location.name, address: location.address, latitude: location.latitude, longitude: location.longitude, radiusMeters: location.radiusMeters } : null,
       requirements: {
         checkIn: { requireLocation: settings.checkIn?.requireLocation ?? true, requireSelfie: settings.checkIn?.requireSelfie ?? true },
         checkOut: { requireLocation: settings.checkOut?.requireLocation ?? true, requireSelfie: settings.checkOut?.requireSelfie ?? true },
@@ -203,7 +204,15 @@ export class AttendanceService implements OnModuleInit {
     const actionKey = action === 'checkIn' ? 'check_in' : 'check_out';
 
     // ---- location
-    const punch: Record<string, unknown> = { at: now, method: 'geofence', deviceId: ctx.deviceId, ip: ctx.ip, queuedOffline: !!input.queuedOffline, clientRecordedAt: input.clientRecordedAt };
+    const punch: Record<string, unknown> = {
+      at: now,
+      method: 'geofence',
+      deviceId: ctx.deviceId,
+      ip: ctx.ip,
+      queuedOffline: !!input.queuedOffline,
+      clientRecordedAt: input.clientRecordedAt,
+      address: input.address,
+    };
     const pendingFlags: { type: string; severity: string; details: Record<string, unknown> }[] = [];
     let exception = false;
     const location = emp.locationId ? await this.locations.findOne({ _id: emp.locationId, organizationId: ctx.orgOid, active: true }).lean<any>() : null;
@@ -211,6 +220,16 @@ export class AttendanceService implements OnModuleInit {
 
     if (hasFix) {
       Object.assign(punch, { latitude: input.latitude, longitude: input.longitude, accuracyMeters: Math.round(input.accuracyMeters!) });
+    }
+
+    if (!punch.address) {
+      if (location?.address) {
+        punch.address = location.address;
+      } else if (location?.name) {
+        punch.address = location.name;
+      } else if (hasFix) {
+        punch.address = await this.reverseGeocode(input.latitude!, input.longitude!);
+      }
     }
 
     let isOutsideCompany = false;
@@ -274,7 +293,10 @@ export class AttendanceService implements OnModuleInit {
     const effectiveRequireSelfie = !isOutsideCompany && requireSelfie;
     if (effectiveRequireSelfie && !input.selfieFileId) throw geoErr('SELFIE_REQUIRED', 'Take a photo to continue.', {});
     let selfieFile: any;
-    if (input.selfieFileId) selfieFile = await this.files.requireOwnUpload(ctx, input.selfieFileId, 'selfie', 10);
+    if (input.selfieFileId) {
+      selfieFile = await this.files.requireOwnUpload(ctx, input.selfieFileId, 'selfie', 10);
+      punch.selfieFileId = selfieFile._id;
+    }
 
     // ---- suspicious patterns (flag only)
     pendingFlags.push(...(await this.detectPatterns(ctx, emp, input, punch, now, org)));
@@ -385,7 +407,7 @@ export class AttendanceService implements OnModuleInit {
       const ev = await this.evidence.create({ organizationId: ctx.orgOid, employeeId: emp._id, attendanceId: record._id, kind: 'selfie', fileId: selfieFile._id, capturedAt: now, deleteAfter });
       await this.files.link(selfieFile._id, { type: 'attendance_evidence', id: ev._id });
       await this.files.setDeleteAfter(selfieFile._id, deleteAfter);
-      await this.attendance.updateOne({ _id: record._id }, { $set: { [`${action}.selfieEvidenceId`]: ev._id } });
+      await this.attendance.updateOne({ _id: record._id }, { $set: { [`${action}.selfieEvidenceId`]: ev._id, [`${action}.selfieFileId`]: selfieFile._id } });
     }
     for (const f of pendingFlags) await this.raiseFlag(ctx.orgOid, emp._id, record._id, f);
 
@@ -431,6 +453,20 @@ export class AttendanceService implements OnModuleInit {
 
     const fresh = await this.attendance.findById(record._id).lean();
     return { record: serialize(fresh), flagsRaised: pendingFlags.map((f) => f.type), exception };
+  }
+
+  private async reverseGeocode(lat: number, lon: number): Promise<string | undefined> {
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}`, {
+        headers: { 'User-Agent': 'SignalHRM/1.0' },
+        signal: AbortSignal.timeout(2500),
+      });
+      if (res.ok) {
+        const data: any = await res.json();
+        return data?.display_name || undefined;
+      }
+    } catch (_) {}
+    return undefined;
   }
 
   private fmt(at: Date, org: any): string {

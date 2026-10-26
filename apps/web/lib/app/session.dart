@@ -115,28 +115,9 @@ class SessionController extends ChangeNotifier {
         return;
       } catch (_) {}
     }
-
-    // If there's neither a profile nor a refresh token, user is definitively signed out.
-    // Transitioning immediately prevents getting stuck on the splash screen.
-    final savedRt = bridge.readLocal('shrm_rt');
-    if (savedRt == null || savedRt.isEmpty) {
-      _status = SessionStatus.signedOut;
-    }
   }
 
   Future<void> restore() async {
-    final savedRt = bridge.readLocal('shrm_rt');
-    final savedMe = bridge.readLocal('shrm_me');
-
-    // Fast-path: if no credentials exist at all, skip network calls completely
-    if ((savedRt == null || savedRt.isEmpty) && (savedMe == null || savedMe.isEmpty)) {
-      if (_status != SessionStatus.signedOut) {
-        _status = SessionStatus.signedOut;
-        notifyListeners();
-      }
-      return;
-    }
-
     try {
       // Bounded restore: if backend is sleeping/cold, do not hang on splash
       final ok = await api.refresh().timeout(const Duration(seconds: 4));

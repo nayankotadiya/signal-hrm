@@ -10,6 +10,7 @@ import '../../widgets/format.dart';
 import '../../widgets/section.dart';
 import '../../widgets/status.dart';
 import '../../platform/bridge.dart';
+import '../../widgets/authed_image.dart';
 import 'attendance_card.dart';
 import 'leave_tab.dart';
 import 'shifts_tab.dart';
@@ -228,6 +229,11 @@ class _AttendanceRecordsState extends State<_AttendanceRecords> {
                   final inLng = cIn['longitude'];
                   final outLat = cOut['latitude'];
                   final outLng = cOut['longitude'];
+                  final inAddr = cIn['address'] as String?;
+                  final outAddr = cOut['address'] as String?;
+                  final displayAddr = inAddr ?? outAddr;
+                  final inPhoto = cIn['selfieFileId'] as String?;
+                  final outPhoto = cOut['selfieFileId'] as String?;
                   final hasLoc = (inLat != null && inLng != null) || (outLat != null && outLng != null);
                   return [
                     Text('${r['employeeName'] ?? ''}'),
@@ -248,12 +254,62 @@ class _AttendanceRecordsState extends State<_AttendanceRecords> {
                           ].join(' · '),
                           style: t.text.caption(),
                         ),
-                        if (hasLoc) ...[
+                        if (displayAddr != null && displayAddr.isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.location_on_rounded, size: 12, color: t.accent),
+                              const SizedBox(width: 3),
+                              Flexible(
+                                child: Text(
+                                  displayAddr,
+                                  style: t.text.caption(weight: FontWeight.w600).copyWith(fontSize: 11, color: t.ink),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        if (hasLoc || inPhoto != null || outPhoto != null) ...[
                           const SizedBox(height: 4),
                           Wrap(
                             spacing: 8,
                             runSpacing: 4,
                             children: [
+                              if (inPhoto != null)
+                                InkWell(
+                                  onTap: () => _viewPhotoModal(context, inPhoto, 'Check-in Face Verification', cIn['at'], inAddr),
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.face_rounded, size: 14, color: t.green),
+                                        const SizedBox(width: 2),
+                                        Text('In Photo', style: t.text.caption(weight: FontWeight.w600).copyWith(color: t.green, decoration: TextDecoration.underline)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              if (outPhoto != null)
+                                InkWell(
+                                  onTap: () => _viewPhotoModal(context, outPhoto, 'Check-out Face Verification', cOut['at'], outAddr),
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.face_rounded, size: 14, color: t.green),
+                                        const SizedBox(width: 2),
+                                        Text('Out Photo', style: t.text.caption(weight: FontWeight.w600).copyWith(color: t.green, decoration: TextDecoration.underline)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                               if (inLat != null && inLng != null)
                                 InkWell(
                                   onTap: () => bridge.openUrl('https://www.google.com/maps?q=$inLat,$inLng'),
@@ -299,6 +355,48 @@ class _AttendanceRecordsState extends State<_AttendanceRecords> {
           ),
         ),
       ]),
+    );
+  }
+
+  void _viewPhotoModal(BuildContext context, String fileId, String title, dynamic punchTime, String? address) {
+    final t = NTokens.of(context);
+    showNSheet<void>(
+      context,
+      title: title,
+      subtitle: punchTime != null ? 'Recorded at ${Fmt.time(punchTime)}' : null,
+      builder: (ctx) => SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AuthedImage(fileId: fileId, height: 320),
+            if (address != null && address.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: t.card,
+                  borderRadius: BorderRadius.circular(t.radiusCard),
+                  border: Border.all(color: t.cardBorder),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.location_on_rounded, size: 16, color: t.accent),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        address,
+                        style: t.text.caption(weight: FontWeight.w600).copyWith(color: t.ink),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -484,23 +582,6 @@ class _FlagsTabState extends State<FlagsTab> {
       ),
     ]);
   }
-}
-
-/// Loads an image through the permission-checked file endpoint (never a public link).
-class AuthedImage extends StatelessWidget {
-  const AuthedImage({super.key, required this.fileId, this.height = 320});
-  final String fileId;
-  final double height;
-
-  @override
-  Widget build(BuildContext context) => AsyncView<DownloadedFile>(
-        load: () => context.api.download('/files/$fileId/content'),
-        compact: true,
-        builder: (context, f, _) => ClipRRect(
-          borderRadius: BorderRadius.circular(NTokens.of(context).radiusTile),
-          child: Image.memory(f.bytes, height: height, fit: BoxFit.contain, semanticLabel: 'Attendance photo'),
-        ),
-      );
 }
 
 /// Holidays and HR events.

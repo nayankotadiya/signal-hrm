@@ -84,11 +84,13 @@ const PunchSchema = new Schema(
     latitude: Number,
     longitude: Number,
     accuracyMeters: Number,
+    address: String,
     locationId: ObjectId,
     distanceMeters: Number,
     /** within_radius | outside_radius | accuracy_too_low | not_required | no_location | exception_pending | exception_approved */
     verification: String,
     selfieEvidenceId: ObjectId,
+    selfieFileId: ObjectId,
     deviceId: String,
     ip: String,
     mockLocationSuspected: Boolean,

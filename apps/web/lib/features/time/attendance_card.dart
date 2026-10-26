@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:n_ui/n_ui.dart';
@@ -9,9 +10,17 @@ import '../../app/config.dart';
 import '../../app/services.dart';
 import '../../data/api.dart';
 import '../../platform/bridge.dart';
+import '../../platform/geocoding.dart';
 import '../../widgets/async_view.dart';
+import '../../widgets/authed_image.dart';
 import '../../widgets/format.dart';
 import '../../widgets/status.dart';
+
+class _CapturedSelfie {
+  const _CapturedSelfie({required this.fileId, required this.bytes});
+  final String fileId;
+  final Uint8List bytes;
+}
 
 /// Offline punches: kept in this browser until the network returns, then sent with their original
 /// Idempotency-Key and `queuedOffline: true`. The server still stamps its own time; when the gap is
@@ -80,6 +89,12 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
   StreamSubscription<bool>? _online;
   int _queued = PunchQueue.read().length;
 
+  Uint8List? _checkInPhotoBytes;
+  Uint8List? _checkOutPhotoBytes;
+  String? _checkInAddress;
+  String? _checkOutAddress;
+  final Map<String, String> _resolvedAddresses = {};
+
   @override
   void initState() {
     super.initState();
@@ -107,20 +122,32 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     }
   }
 
-  Future<String?> _takeSelfie(bool checkIn, String? locationName, {String? stepTitle}) async {
+  Future<_CapturedSelfie?> _takeSelfie(
+    bool checkIn,
+    String? locationName, {
+    String? locationAddress,
+    String? stepTitle,
+  }) async {
     final api = context.api;
     if (!mounted) return null;
     final picked = await showNSheet<PickedFile?>(
       context,
       title: stepTitle ?? (checkIn ? 'Check-in photo' : 'Check-out photo'),
       subtitle: 'Capture attendance photo to verify your punch.',
-      builder: (ctx) => _SelfieSheet(isCheckIn: checkIn, locationName: locationName, stepTitle: stepTitle),
+      builder: (ctx) => _SelfieSheet(
+        isCheckIn: checkIn,
+        locationName: locationName,
+        locationAddress: locationAddress,
+        stepTitle: stepTitle,
+      ),
     );
 
     if (picked == null || !mounted) return null;
     setState(() => _phase = _Phase.sending);
     final rec = await api.upload(picked, purpose: 'selfie');
-    return rec['id'] as String?;
+    final id = rec['id'] as String?;
+    if (id == null) return null;
+    return _CapturedSelfie(fileId: id, bytes: picked.bytes);
   }
 
   Future<void> _punch(Json today, {String? exceptionReason, bool remote = false}) async {
@@ -139,6 +166,7 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     final body = <String, dynamic>{};
     try {
       // 1. Geolocation verification first so we know if user is inside or outside company area
+      String? resolvedAddress;
       if (needLocation) {
         setState(() => _phase = _Phase.locating);
         try {
@@ -165,6 +193,14 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
           body['latitude'] = _lastFix!.latitude;
           body['longitude'] = _lastFix!.longitude;
           body['accuracyMeters'] = _lastFix!.accuracyMeters;
+          final loc = jsonMap(today['location']);
+          resolvedAddress = await Geocoding.reverseGeocode(
+            _lastFix!.latitude,
+            _lastFix!.longitude,
+            fallbackAddress: loc['address'] as String?,
+            fallbackLocationName: loc['name'] as String?,
+          );
+          body['address'] = resolvedAddress;
         }
       }
 
@@ -183,16 +219,26 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
       }
 
       // 2. Selfie verification: ONLY when inside company area!
-      // When outside company area, selfie is skipped per company policy
+      _CapturedSelfie? selfie;
       if (needSelfie && !isOutsideCompany) {
         setState(() => _phase = _Phase.selfie);
         final locName = loc['name'] as String?;
-        final id = await _takeSelfie(isCheckIn, locName, stepTitle: stepTitle);
-        if (id == null) {
+        selfie = await _takeSelfie(
+          isCheckIn,
+          locName,
+          locationAddress: resolvedAddress ?? loc['address'] as String?,
+          stepTitle: stepTitle,
+        );
+        if (selfie == null) {
           setState(() => _phase = _Phase.idle);
           return;
         }
-        body['selfieFileId'] = id;
+        body['selfieFileId'] = selfie.fileId;
+        if (isCheckIn) {
+          _checkInPhotoBytes = selfie.bytes;
+        } else {
+          _checkOutPhotoBytes = selfie.bytes;
+        }
       }
 
       if (exceptionReason != null) body['exceptionReason'] = exceptionReason;
@@ -205,6 +251,15 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
       final rec = jsonMap(r['record']);
       final punch = jsonMap(rec[isCheckIn ? 'checkIn' : 'checkOut']);
       final punchTime = punch['at'] != null ? Fmt.time(punch['at']) : 'now';
+      final fileId = punch['selfieFileId'] as String? ?? selfie?.fileId;
+      final finalAddress = punch['address'] as String? ?? resolvedAddress;
+      if (finalAddress != null) {
+        if (isCheckIn) {
+          _checkInAddress = finalAddress;
+        } else {
+          _checkOutAddress = finalAddress;
+        }
+      }
 
       final successMsg = isCheckIn
           ? 'Check-in recorded at $punchTime.'
@@ -216,6 +271,19 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
       setState(() => _phase = _Phase.idle);
       _view.currentState?.reload();
       widget.onChanged?.call();
+
+      await _showPunchSuccessModal(
+        context,
+        isCheckIn: isCheckIn,
+        punchTime: punchTime,
+        punch: punch,
+        selfieBytes: selfie?.bytes,
+        selfieFileId: fileId,
+        address: finalAddress,
+        shift: jsonMap(today['shift']),
+        location: loc,
+        isException: r['exception'] == true,
+      );
     } on ApiException catch (e) {
       if (!mounted) return;
       if (e.isNetwork && !bridge.online) {
@@ -299,7 +367,578 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     );
   }
 
-  Widget _buildShiftSchedule(NTokens t, String state, Map<String, dynamic> rec, double dayCount, bool isMobile) {
+  String? _getOrResolveAddress(
+    double? lat,
+    double? lng,
+    String? locName,
+    String? locAddress,
+    String? existingAddress,
+  ) {
+    if (existingAddress != null && existingAddress.isNotEmpty) return existingAddress;
+    if (lat == null || lng == null) return locAddress ?? locName;
+    final key = '${lat.toStringAsFixed(4)},${lng.toStringAsFixed(4)}';
+    if (_resolvedAddresses.containsKey(key)) return _resolvedAddresses[key];
+
+    // Background reverse geocode lookup
+    Geocoding.reverseGeocode(
+      lat,
+      lng,
+      fallbackAddress: locAddress,
+      fallbackLocationName: locName,
+    ).then((resolved) {
+      if (mounted && resolved.isNotEmpty && _resolvedAddresses[key] != resolved) {
+        setState(() {
+          _resolvedAddresses[key] = resolved;
+        });
+      }
+    });
+    return locAddress ?? locName ?? '${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}';
+  }
+
+  void _openPhotoLightbox(
+    BuildContext context, {
+    required String title,
+    required String? time,
+    required String? address,
+    required double? lat,
+    required double? lng,
+    Uint8List? photoBytes,
+    String? fileId,
+  }) {
+    final t = NTokens.of(context);
+    showNSheet<void>(
+      context,
+      title: title,
+      subtitle: time != null ? 'Recorded at $time' : null,
+      builder: (ctx) => SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: t.pillTrack,
+                borderRadius: BorderRadius.circular(t.radiusPanel),
+                border: Border.all(color: t.cardBorder),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: photoBytes != null
+                  ? Image.memory(photoBytes, height: 280, fit: BoxFit.cover)
+                  : (fileId != null
+                      ? AuthedImage(fileId: fileId, height: 280, fit: BoxFit.cover)
+                      : Container(
+                          height: 180,
+                          color: t.pillTrack,
+                          child: Center(
+                            child: Icon(Icons.face_rounded, size: 60, color: t.muted),
+                          ),
+                        )),
+            ),
+            const SizedBox(height: 14),
+            if (address != null && address.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: t.card,
+                  borderRadius: BorderRadius.circular(t.radiusCard),
+                  border: Border.all(color: t.cardBorder),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.location_on_rounded, size: 16, color: t.accent),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Punch Location Address',
+                          style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.ink),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(address, style: t.text.body(weight: FontWeight.w600).copyWith(color: t.ink)),
+                    if (lat != null && lng != null) ...[
+                      const SizedBox(height: 8),
+                      InkWell(
+                        onTap: () => bridge.openUrl('https://www.google.com/maps?q=$lat,$lng'),
+                        child: Text(
+                          'Open in Google Maps (${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)})',
+                          style: t.text.caption(weight: FontWeight.w600).copyWith(
+                                color: t.accent,
+                                decoration: TextDecoration.underline,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPunchDetailTile({
+    required NTokens t,
+    required String title,
+    required String? time,
+    required double? lat,
+    required double? lng,
+    required String? address,
+    required Uint8List? photoBytes,
+    required String? photoFileId,
+    required bool isComplete,
+    required bool isMobile,
+  }) {
+    final hasPhoto = photoBytes != null || photoFileId != null;
+
+    return Container(
+      constraints: BoxConstraints(minWidth: isMobile ? double.infinity : 210),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: t.card,
+        borderRadius: BorderRadius.circular(t.radiusTile),
+        border: Border.all(color: t.divider),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Face Attendance Photo Thumbnail (Clickable to enlarge)
+          GestureDetector(
+            onTap: hasPhoto
+                ? () => _openPhotoLightbox(
+                      context,
+                      title: '$title Face Verification',
+                      time: time,
+                      address: address,
+                      lat: lat,
+                      lng: lng,
+                      photoBytes: photoBytes,
+                      fileId: photoFileId,
+                    )
+                : null,
+            child: Stack(
+              children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: t.pillTrack,
+                    borderRadius: BorderRadius.circular(t.radiusTile),
+                    border: Border.all(
+                      color: hasPhoto ? t.accent.withValues(alpha: 0.5) : t.divider,
+                      width: 1.5,
+                    ),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: photoBytes != null
+                      ? Image.memory(photoBytes, fit: BoxFit.cover)
+                      : (photoFileId != null
+                          ? AuthedImage(fileId: photoFileId, height: 52, width: 52, fit: BoxFit.cover)
+                          : Center(
+                              child: Icon(
+                                isComplete ? Icons.face_rounded : Icons.camera_alt_outlined,
+                                size: 22,
+                                color: isComplete ? t.accent : t.muted,
+                              ),
+                            )),
+                ),
+                if (hasPhoto)
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: t.green,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1.5),
+                      ),
+                      child: const Icon(Icons.check, size: 8, color: Colors.white),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+
+          // Time and Location Details
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: t.text.caption(weight: FontWeight.w500).copyWith(color: t.muted, fontSize: 11),
+                ),
+                const SizedBox(height: 1),
+                Row(
+                  children: [
+                    Text(
+                      time ?? '—',
+                      style: t.text.caption(weight: FontWeight.w700).copyWith(
+                            color: time != null ? t.ink : t.muted,
+                            fontSize: 13,
+                          ),
+                    ),
+                    if (hasPhoto) ...[
+                      const SizedBox(width: 6),
+                      InkWell(
+                        onTap: () => _openPhotoLightbox(
+                          context,
+                          title: '$title Face Verification',
+                          time: time,
+                          address: address,
+                          lat: lat,
+                          lng: lng,
+                          photoBytes: photoBytes,
+                          fileId: photoFileId,
+                        ),
+                        child: Text(
+                          'View Photo',
+                          style: t.text.caption(weight: FontWeight.w600).copyWith(
+                                color: t.accent,
+                                fontSize: 10,
+                                decoration: TextDecoration.underline,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                if (address != null && address.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1.5),
+                        child: Icon(Icons.location_on_rounded, size: 12, color: t.accent),
+                      ),
+                      const SizedBox(width: 3),
+                      Expanded(
+                        child: Text(
+                          address,
+                          style: t.text.caption().copyWith(fontSize: 10, color: t.ink),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                if (lat != null && lng != null) ...[
+                  const SizedBox(height: 2),
+                  InkWell(
+                    onTap: () => bridge.openUrl('https://www.google.com/maps?q=$lat,$lng'),
+                    child: Text(
+                      'View on Map',
+                      style: t.text.caption(weight: FontWeight.w600).copyWith(
+                            color: t.accent,
+                            fontSize: 10,
+                            decoration: TextDecoration.underline,
+                          ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showPunchSuccessModal(
+    BuildContext context, {
+    required bool isCheckIn,
+    required String punchTime,
+    required Map<String, dynamic> punch,
+    required Uint8List? selfieBytes,
+    required String? selfieFileId,
+    required String? address,
+    required Map<String, dynamic> shift,
+    required Map<String, dynamic> location,
+    required bool isException,
+  }) async {
+    final t = NTokens.of(context);
+    final isMobile = NBreakpoint.of(context).isMobile;
+    final lat = (punch['latitude'] as num?)?.toDouble() ?? _lastFix?.latitude;
+    final lng = (punch['longitude'] as num?)?.toDouble() ?? _lastFix?.longitude;
+    final accuracy = (punch['accuracyMeters'] as num?)?.round() ?? _lastFix?.accuracyMeters.round();
+    final dist = (punch['distanceMeters'] as num?)?.round();
+    final shiftName = shift['name'] as String? ?? 'Standard Shift';
+    final shiftHours = shift['startTime'] != null && shift['endTime'] != null
+        ? '${shift['startTime']} – ${shift['endTime']}'
+        : '10:00 AM – 7:00 PM';
+
+    await showNSheet<void>(
+      context,
+      title: isCheckIn ? 'Check-In Confirmed' : 'Check-Out Confirmed',
+      subtitle: isException
+          ? 'Recorded at $punchTime. Sent for exception approval.'
+          : 'Successfully recorded at $punchTime',
+      builder: (ctx) => SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Status Hero Banner
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: (isCheckIn ? t.accent : t.green).withValues(alpha: t.isDark ? 0.22 : 0.14),
+                borderRadius: BorderRadius.circular(t.radiusCard),
+                border: Border.all(
+                  color: (isCheckIn ? t.accent : t.green).withValues(alpha: 0.4),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: isCheckIn ? t.accent : t.green,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.check_rounded, color: Colors.white, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isCheckIn ? 'Checked In Successfully' : 'Checked Out Successfully',
+                          style: t.text.title(size: 15).copyWith(
+                                color: isCheckIn ? t.accent : t.green,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          'Recorded at $punchTime · Server clock verified',
+                          style: t.text.caption(color: t.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Captured Face Attendance Photo
+            if (selfieBytes != null || selfieFileId != null) ...[
+              Container(
+                decoration: BoxDecoration(
+                  color: t.pillTrack,
+                  borderRadius: BorderRadius.circular(t.radiusPanel),
+                  border: Border.all(color: t.cardBorder),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Stack(
+                  alignment: Alignment.bottomCenter,
+                  children: [
+                    if (selfieBytes != null)
+                      Image.memory(
+                        selfieBytes,
+                        height: isMobile ? 200 : 240,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                      )
+                    else if (selfieFileId != null)
+                      AuthedImage(
+                        fileId: selfieFileId,
+                        height: isMobile ? 200 : 240,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                      ),
+                    Positioned(
+                      top: 10,
+                      left: 10,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.face_rounded, size: 14, color: Colors.white),
+                            SizedBox(width: 5),
+                            Text(
+                              'Face Verified',
+                              style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [
+                              Colors.black.withValues(alpha: 0.8),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                        child: Text(
+                          'Captured Attendance Photo · $punchTime',
+                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+            ],
+
+            // Location & Address Card
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: t.card,
+                borderRadius: BorderRadius.circular(t.radiusCard),
+                border: Border.all(color: t.cardBorder),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.location_on_rounded, size: 18, color: t.accent),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Location & Address',
+                        style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.ink),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    address ?? (location['address'] as String?) ?? (location['name'] as String?) ?? 'Work Office Location',
+                    style: t.text.body(weight: FontWeight.w600).copyWith(color: t.ink, height: 1.35),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (dist != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: t.pillTrack,
+                            borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                          ),
+                          child: Text(
+                            dist == 0 ? 'Inside Office Area' : '$dist m from office',
+                            style: t.text.caption(color: t.muted).copyWith(fontSize: 11),
+                          ),
+                        ),
+                      if (accuracy != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: t.pillTrack,
+                            borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                          ),
+                          child: Text(
+                            'Accuracy: ±$accuracy m',
+                            style: t.text.caption(color: t.muted).copyWith(fontSize: 11),
+                          ),
+                        ),
+                      if (lat != null && lng != null)
+                        InkWell(
+                          onTap: () => bridge.openUrl('https://www.google.com/maps?q=$lat,$lng'),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.map_rounded, size: 14, color: t.accent),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Open in Google Maps',
+                                  style: t.text.caption(weight: FontWeight.w700).copyWith(
+                                        color: t.accent,
+                                        fontSize: 11,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Shift Details Card
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: t.pillTrack.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(t.radiusCard),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.schedule_rounded, size: 16, color: t.muted),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '$shiftName ($shiftHours)',
+                      style: t.text.caption().copyWith(color: t.ink),
+                    ),
+                  ),
+                  Text(
+                    isCheckIn ? 'Active Session' : 'Shift Recorded',
+                    style: t.text.caption(weight: FontWeight.w600).copyWith(
+                          color: isCheckIn ? t.accent : t.green,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+
+            // Close / Done button
+            NButton(
+              label: 'Done',
+              icon: Icons.check_circle_outline_rounded,
+              variant: NButtonVariant.accent,
+              onPressed: () => Navigator.of(ctx).pop(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShiftSchedule(NTokens t, String state, Map<String, dynamic> rec, Json today, double dayCount, bool isMobile) {
     final checkIn = jsonMap(rec['checkIn']);
     final checkOut = jsonMap(rec['checkOut']);
     final inTime = checkIn['at'] as String?;
@@ -311,6 +950,29 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     final workedMins = (rec['workedMinutes'] as num? ?? 0).toInt();
     final breakMins = (rec['breakMinutes'] as num? ?? 0).toInt();
     final sessionsList = (rec['sessions'] as List<dynamic>?)?.map((s) => jsonMap(s)).toList() ?? [];
+
+    final loc = jsonMap(today['location']);
+    final locName = loc['name'] as String?;
+    final locAddress = loc['address'] as String?;
+
+    final inAddress = _getOrResolveAddress(
+      inLat != null ? (inLat as num).toDouble() : null,
+      inLng != null ? (inLng as num).toDouble() : null,
+      locName,
+      locAddress,
+      checkIn['address'] as String? ?? _checkInAddress,
+    );
+
+    final outAddress = _getOrResolveAddress(
+      outLat != null ? (outLat as num).toDouble() : null,
+      outLng != null ? (outLng as num).toDouble() : null,
+      locName,
+      locAddress,
+      checkOut['address'] as String? ?? _checkOutAddress,
+    );
+
+    final inPhotoFileId = checkIn['selfieFileId'] as String?;
+    final outPhotoFileId = checkOut['selfieFileId'] as String?;
 
     final hasCheckedIn = inTime != null;
     final hasCheckedOut = outTime != null;
@@ -467,78 +1129,56 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
             const Divider(height: 1),
             const SizedBox(height: 10),
             Wrap(
-              spacing: 16,
+              spacing: 12,
               runSpacing: 10,
               children: [
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minWidth: 80),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('First Check In', style: t.text.caption(weight: FontWeight.w500).copyWith(color: t.muted)),
-                      const SizedBox(height: 2),
-                      Text(
-                        hasCheckedIn ? Fmt.time(inTime) : '—',
-                        style: t.text.caption(weight: FontWeight.w700).copyWith(color: hasCheckedIn ? t.ink : t.muted),
-                      ),
-                      if (inLat != null && inLng != null) ...[
-                        const SizedBox(height: 2),
-                        InkWell(
-                          onTap: () => bridge.openUrl('https://www.google.com/maps?q=$inLat,$inLng'),
-                          child: Text(
-                            'View GPS',
-                            style: t.text.caption(weight: FontWeight.w600).copyWith(
-                                  color: t.accent,
-                                  fontSize: 10,
-                                  decoration: TextDecoration.underline,
-                                ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
+                _buildPunchDetailTile(
+                  t: t,
+                  title: 'First Check In',
+                  time: hasCheckedIn ? Fmt.time(inTime) : null,
+                  lat: inLat != null ? (inLat as num).toDouble() : null,
+                  lng: inLng != null ? (inLng as num).toDouble() : null,
+                  address: inAddress,
+                  photoBytes: _checkInPhotoBytes,
+                  photoFileId: inPhotoFileId,
+                  isComplete: hasCheckedIn,
+                  isMobile: isMobile,
                 ),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minWidth: 80),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Latest Check Out', style: t.text.caption(weight: FontWeight.w500).copyWith(color: t.muted)),
-                      const SizedBox(height: 2),
-                      Text(
-                        hasCheckedOut ? Fmt.time(outTime) : (hasCheckedIn ? 'In Progress' : '—'),
-                        style: t.text.caption(weight: FontWeight.w700).copyWith(color: hasCheckedOut ? t.ink : t.muted),
-                      ),
-                      if (outLat != null && outLng != null) ...[
-                        const SizedBox(height: 2),
-                        InkWell(
-                          onTap: () => bridge.openUrl('https://www.google.com/maps?q=$outLat,$outLng'),
-                          child: Text(
-                            'View GPS',
-                            style: t.text.caption(weight: FontWeight.w600).copyWith(
-                                  color: t.accent,
-                                  fontSize: 10,
-                                  decoration: TextDecoration.underline,
-                                ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
+                _buildPunchDetailTile(
+                  t: t,
+                  title: 'Latest Check Out',
+                  time: hasCheckedOut ? Fmt.time(outTime) : (hasCheckedIn ? 'In Progress' : null),
+                  lat: outLat != null ? (outLat as num).toDouble() : null,
+                  lng: outLng != null ? (outLng as num).toDouble() : null,
+                  address: outAddress,
+                  photoBytes: _checkOutPhotoBytes,
+                  photoFileId: outPhotoFileId,
+                  isComplete: hasCheckedOut,
+                  isMobile: isMobile,
                 ),
                 if (workedMins > 0)
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 80),
+                  Container(
+                    constraints: BoxConstraints(minWidth: isMobile ? double.infinity : 130),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: t.card,
+                      borderRadius: BorderRadius.circular(t.radiusTile),
+                      border: Border.all(color: t.divider),
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Worked', style: t.text.caption(weight: FontWeight.w500).copyWith(color: t.muted)),
+                        Text('Total Worked', style: t.text.caption(weight: FontWeight.w500).copyWith(color: t.muted, fontSize: 11)),
                         const SizedBox(height: 2),
                         Text(
                           Fmt.minutes(workedMins),
-                          style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.accent),
+                          style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.accent, fontSize: 13),
                         ),
-                        Text(breakMins > 0 ? '${Fmt.minutes(breakMins)} break' : 'net work', style: t.text.caption().copyWith(fontSize: 9, color: t.muted)),
+                        const SizedBox(height: 1),
+                        Text(
+                          breakMins > 0 ? '${Fmt.minutes(breakMins)} break deducted' : 'Net productive time',
+                          style: t.text.caption().copyWith(fontSize: 10, color: t.muted),
+                        ),
                       ],
                     ),
                   ),
@@ -705,13 +1345,17 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                 ),
 
               // Shift Schedule & Punch Details
-              _buildShiftSchedule(t, state, rec, dayCount, isMobile),
+              _buildShiftSchedule(t, state, rec, today, dayCount, isMobile),
 
               // Work location row
               if (!widget.compact)
                 NInfoRow(
                   label: 'Work location',
-                  value: loc.isEmpty ? 'Main Office' : '${loc['name']} (within ${loc['radiusMeters'] ?? 100} m)',
+                  value: loc.isEmpty
+                      ? 'Main Office'
+                      : (loc['address'] != null && (loc['address'] as String).isNotEmpty
+                          ? '${loc['name']} · ${loc['address']} (within ${loc['radiusMeters'] ?? 100} m)'
+                          : '${loc['name']} (within ${loc['radiusMeters'] ?? 100} m)'),
                 ),
 
               if (_problem != null) _problemPanel(t, today),
@@ -789,9 +1433,15 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
 }
 
 class _SelfieSheet extends StatefulWidget {
-  const _SelfieSheet({required this.isCheckIn, this.locationName, this.stepTitle});
+  const _SelfieSheet({
+    required this.isCheckIn,
+    this.locationName,
+    this.locationAddress,
+    this.stepTitle,
+  });
   final bool isCheckIn;
   final String? locationName;
+  final String? locationAddress;
   final String? stepTitle;
 
   @override
@@ -826,6 +1476,7 @@ class _SelfieSheetState extends State<_SelfieSheet> {
     final t = NTokens.of(context);
     final actionName = widget.stepTitle ?? (widget.isCheckIn ? 'Check in' : 'Check out');
     final isMobile = NBreakpoint.of(context).isMobile;
+    final displayLoc = widget.locationAddress ?? widget.locationName;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -855,11 +1506,11 @@ class _SelfieSheetState extends State<_SelfieSheet> {
                   ],
                 ),
               ),
-              if (widget.locationName != null) ...[
+              if (displayLoc != null) ...[
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '📍 ${widget.locationName}',
+                    '📍 $displayLoc',
                     style: t.text.caption().copyWith(color: t.muted),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
