@@ -3,11 +3,12 @@ import { Cron } from '@nestjs/schedule';
 import { Model, Types } from 'mongoose';
 import * as webpush from 'web-push';
 import type { Ctx } from '../../common/auth/context';
+import { decrypt } from '../../common/crypto/crypto';
 import { badRequest, ListQuery, notFound, oid, Paged } from '../../common/http/validation';
 import { MailService } from '../../common/mail/mail.service';
 import { OrgSettingsService } from '../../common/org/org-settings.service';
 import { APP_CONFIG } from '../../config/config.module';
-import type { AppEnv } from '../../config/env.schema';
+import { AppEnv, secretOf } from '../../config/env.schema';
 import { InjectModel, serialize } from '../../database/model';
 import { JobsService } from '../system/jobs.service';
 import { RealtimeService } from './realtime.service';
@@ -201,6 +202,7 @@ export class NotificationsService implements OnModuleInit {
     @InjectModel('NotificationDelivery') private readonly deliveries: Model<any>,
     @InjectModel('PushSubscription') private readonly pushSubs: Model<any>,
     @InjectModel('User') private readonly users: Model<any>,
+    @InjectModel('IntegrationConnection') private readonly connections: Model<any>,
   ) {}
 
   onModuleInit(): void {
@@ -247,8 +249,86 @@ export class NotificationsService implements OnModuleInit {
         }
       }
       if (unique.length) void this.deliverQueued().catch(() => undefined);
+
+      // Automated broadcast to connected Slack & WhatsApp channels
+      if (input.event.startsWith('attendance_') || input.event === 'security_alert') {
+        void this.dispatchToIntegrations(orgId, input).catch((e) =>
+          this.logger.warn(`dispatchToIntegrations failed: ${e.message}`),
+        );
+      }
     } catch (e) {
       this.logger.error(`notify(${input.event}) failed: ${(e as Error).message}`);
+    }
+  }
+
+  /** Dispatches real-time attendance & security alerts to connected Slack webhooks and WhatsApp Cloud APIs. */
+  private async dispatchToIntegrations(orgId: Types.ObjectId, input: NotifyInput): Promise<void> {
+    try {
+      const activeConns = await this.connections
+        .find({ organizationId: orgId, provider: { $in: ['slack', 'whatsapp'] }, status: 'connected' })
+        .lean<any[]>();
+
+      if (!activeConns.length) return;
+
+      const encKey = secretOf(this.env, 'ENCRYPTION_KEY');
+
+      for (const conn of activeConns) {
+        if (!conn.tokenEnc) continue;
+
+        const cfg = conn.config || {};
+        if (input.event === 'attendance_check_in' && cfg.notifyCheckIn === false) continue;
+        if (input.event === 'attendance_check_out' && cfg.notifyCheckOut === false) continue;
+        if (input.event === 'attendance_checkout_reminder' && cfg.notifyReminder === false) continue;
+
+        if (conn.provider === 'slack') {
+          try {
+            const webhookUrl = decrypt(conn.tokenEnc, encKey);
+            const portalUrl = this.env.PUBLIC_WEB_URL
+              ? `${this.env.PUBLIC_WEB_URL}${input.link?.startsWith('/') ? '' : '/'}${input.link || ''}`
+              : '';
+            const payload = {
+              text: `🔔 *${input.title}*\n${input.body || ''}${portalUrl ? `\n<${portalUrl}|Open Signal HRM>` : ''}`,
+            };
+            await fetch(webhookUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+              signal: AbortSignal.timeout(6000),
+            });
+          } catch (err: any) {
+            this.logger.warn(`Failed dispatching to Slack webhook: ${err.message}`);
+          }
+        } else if (conn.provider === 'whatsapp') {
+          try {
+            const token = decrypt(conn.tokenEnc, encKey);
+            const phoneNumberId = cfg.phoneNumberId;
+            const recipientNumber = cfg.recipientNumber;
+            if (phoneNumberId && recipientNumber) {
+              await fetch(`https://graph.facebook.com/v19.0/${encodeURIComponent(phoneNumberId)}/messages`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                  messaging_product: 'whatsapp',
+                  recipient_type: 'individual',
+                  to: recipientNumber,
+                  type: 'text',
+                  text: {
+                    body: `*Signal HRM Alert*\n*${input.title}*\n\n${input.body || ''}`,
+                  },
+                }),
+                signal: AbortSignal.timeout(6000),
+              });
+            }
+          } catch (err: any) {
+            this.logger.warn(`Failed dispatching to WhatsApp: ${err.message}`);
+          }
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`dispatchToIntegrations error: ${err.message}`);
     }
   }
 

@@ -1297,19 +1297,46 @@ class IntegrationsTab extends StatelessWidget {
           InfoCard(
             title: switch (i['provider']) {
               'meta_leads' => 'Meta lead ads',
-              'whatsapp' => 'WhatsApp',
-              _ => 'SMS',
+              'slack' => 'Slack Attendance & Alerts',
+              'whatsapp' => 'WhatsApp Cloud Alerts',
+              _ => 'SMS Gateway',
             },
             trailing: StatusChip('${i['status']}'),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               if (i['available'] != true)
                 Text('Not available in this version.', style: t.text.body(color: t.muted))
               else ...[
-                Text('New leads from your Facebook and Instagram lead forms arrive in CRM within minutes, de-duplicated by phone and email.', style: t.text.body(color: t.muted)),
+                Text(
+                  switch (i['provider']) {
+                    'meta_leads' =>
+                      'New leads from your Facebook and Instagram lead forms arrive in CRM within minutes, de-duplicated by phone and email.',
+                    'slack' =>
+                      'Post instant channel notifications when employees check in, check out, and automated 7:00 PM evening check-out reminders.',
+                    'whatsapp' =>
+                      'Automated WhatsApp alerts to employees and admins for check-in confirmations and 7:00 PM shift-end reminders.',
+                    _ =>
+                      'SMS notifications for critical alerts and verification codes.',
+                  },
+                  style: t.text.body(color: t.muted),
+                ),
                 const SizedBox(height: 8),
-                if (i['webhookConfigured'] != true) const NBanner(message: 'The server is missing META_APP_SECRET or META_VERIFY_TOKEN, so Meta cannot deliver leads yet.', tone: NBannerTone.warning),
+                if (i['provider'] == 'meta_leads' && i['webhookConfigured'] != true)
+                  const NBanner(
+                    message: 'The server is missing META_APP_SECRET or META_VERIFY_TOKEN, so Meta cannot deliver leads yet.',
+                    tone: NBannerTone.warning,
+                  ),
                 if (i['connection'] != null) ...[
-                  NInfoRow(label: 'Page', value: '${jsonMap(jsonMap(i['connection'])['config'])['pageId'] ?? ''}'),
+                  if (i['provider'] == 'meta_leads')
+                    NInfoRow(label: 'Page', value: '${jsonMap(jsonMap(i['connection'])['config'])['pageId'] ?? ''}'),
+                  if (i['provider'] == 'slack') ...[
+                    NInfoRow(label: 'Channel', value: '${jsonMap(jsonMap(i['connection'])['config'])['channelName'] ?? '#attendance-alerts'}'),
+                    const NInfoRow(label: 'Alerts', value: 'Check-In, Check-Out, 7 PM Reminder'),
+                  ],
+                  if (i['provider'] == 'whatsapp') ...[
+                    NInfoRow(label: 'Phone Number ID', value: '${jsonMap(jsonMap(i['connection'])['config'])['phoneNumberId'] ?? ''}'),
+                    if (jsonMap(jsonMap(i['connection'])['config'])['recipientNumber'] != null)
+                      NInfoRow(label: 'Recipient', value: '${jsonMap(jsonMap(i['connection'])['config'])['recipientNumber']}'),
+                  ],
                   NInfoRow(label: 'Last sync', value: jsonMap(i['connection'])['lastSyncAt'] == null ? 'Never' : Fmt.relative(jsonMap(i['connection'])['lastSyncAt'])),
                   if (jsonMap(i['connection'])['lastError'] != null) NBanner(message: '${jsonMap(i['connection'])['lastError']}', tone: NBannerTone.danger),
                   NInfoRow(label: 'Last 24 hours', value: jsonMap(i['last24h']).entries.map((e) => '${Fmt.label(e.key)}: ${e.value}').join(' · ')),
@@ -1321,26 +1348,75 @@ class IntegrationsTab extends StatelessWidget {
                       label: i['connection'] == null ? 'Connect' : 'Reconnect',
                       compact: true,
                       onPressed: () async {
-                        final r = await showFormSheet<Json>(
-                          context,
-                          title: 'Connect Meta lead ads',
-                          subtitle: 'The token is checked with Meta, then stored encrypted. It is never shown again.',
-                          fields: const [
-                            FieldSpec('pageId', 'Facebook Page ID', required: true),
-                            FieldSpec('accessToken', 'Page access token', kind: FieldKind.password, required: true),
-                            FieldSpec('defaultOwnerEmployeeId', 'Assign new leads to', kind: FieldKind.asyncSelect, loadOptions: Lookups.employees),
-                            FieldSpec('formIdsText', 'Only these form IDs (optional)', hint: '1234567890, 2345678901'),
-                          ],
-                          successMessage: 'Saved.',
-                          submit: (v, key) async {
-                            final body = <String, dynamic>{...v}..remove('formIdsText');
-                            if (v['formIdsText'] != null) body['formIds'] = [for (final s in '${v['formIdsText']}'.split(',')) if (s.trim().isNotEmpty) s.trim()];
-                            return jsonMap(await context.api.put('/integrations/meta', body: body, idempotencyKey: key));
-                          },
-                        );
-                        if (r != null) reload();
+                        if (i['provider'] == 'slack') {
+                          final r = await showFormSheet<Json>(
+                            context,
+                            title: 'Connect Slack Alerts',
+                            subtitle: 'Enter your Slack Incoming Webhook URL. It will be stored encrypted.',
+                            fields: const [
+                              FieldSpec('webhookUrl', 'Incoming Webhook URL', required: true, hint: 'https://hooks.slack.com/services/...'),
+                              FieldSpec('channelName', 'Channel Name', hint: '#attendance-alerts'),
+                            ],
+                            successMessage: 'Slack alerts connected successfully.',
+                            submit: (v, key) async {
+                              return jsonMap(await context.api.put('/integrations/slack', body: v, idempotencyKey: key));
+                            },
+                          );
+                          if (r != null) reload();
+                        } else if (i['provider'] == 'whatsapp') {
+                          final r = await showFormSheet<Json>(
+                            context,
+                            title: 'Connect WhatsApp Cloud API',
+                            subtitle: 'Enter your Meta WhatsApp Business API credentials. They are stored encrypted.',
+                            fields: const [
+                              FieldSpec('phoneNumberId', 'WhatsApp Phone Number ID', required: true, hint: 'e.g. 108294729102941'),
+                              FieldSpec('accessToken', 'System User Access Token', kind: FieldKind.password, required: true),
+                              FieldSpec('recipientNumber', 'Default Alert Phone Number', hint: '+919876543210'),
+                            ],
+                            successMessage: 'WhatsApp alerts connected successfully.',
+                            submit: (v, key) async {
+                              return jsonMap(await context.api.put('/integrations/whatsapp', body: v, idempotencyKey: key));
+                            },
+                          );
+                          if (r != null) reload();
+                        } else {
+                          final r = await showFormSheet<Json>(
+                            context,
+                            title: 'Connect Meta lead ads',
+                            subtitle: 'The token is checked with Meta, then stored encrypted. It is never shown again.',
+                            fields: const [
+                              FieldSpec('pageId', 'Facebook Page ID', required: true),
+                              FieldSpec('accessToken', 'Page access token', kind: FieldKind.password, required: true),
+                              FieldSpec('defaultOwnerEmployeeId', 'Assign new leads to', kind: FieldKind.asyncSelect, loadOptions: Lookups.employees),
+                              FieldSpec('formIdsText', 'Only these form IDs (optional)', hint: '1234567890, 2345678901'),
+                            ],
+                            successMessage: 'Saved.',
+                            submit: (v, key) async {
+                              final body = <String, dynamic>{...v}..remove('formIdsText');
+                              if (v['formIdsText'] != null) body['formIds'] = [for (final s in '${v['formIdsText']}'.split(',')) if (s.trim().isNotEmpty) s.trim()];
+                              return jsonMap(await context.api.put('/integrations/meta', body: body, idempotencyKey: key));
+                            },
+                          );
+                          if (r != null) reload();
+                        }
                       },
                     ),
+                    if (i['connection'] != null && (i['provider'] == 'slack' || i['provider'] == 'whatsapp'))
+                      NButton(
+                        label: 'Send Test Alert',
+                        compact: true,
+                        variant: NButtonVariant.secondary,
+                        onPressed: () async {
+                          try {
+                            final res = jsonMap(await context.api.post('/integrations/${i['provider']}/test'));
+                            if (context.mounted) {
+                              NToast.of(context).show('${res['message'] ?? 'Test alert sent successfully!'}');
+                            }
+                          } catch (e) {
+                            if (context.mounted) showError(context, e);
+                          }
+                        },
+                      ),
                     if (i['connection'] != null)
                       NButton(label: 'Sync log', compact: true, variant: NButtonVariant.secondary, onPressed: () => _logs(context, '${i['provider']}')),
                     if (i['connection'] != null && i['status'] != 'disabled')
@@ -1349,7 +1425,7 @@ class IntegrationsTab extends StatelessWidget {
                         compact: true,
                         variant: NButtonVariant.secondary,
                         onPressed: () async {
-                          final c = await showNConfirm(context, title: 'Disconnect?', message: 'New leads stop arriving. Existing leads stay in CRM.', confirmLabel: 'Disconnect', destructive: true);
+                          final c = await showNConfirm(context, title: 'Disconnect?', message: 'Alerts and notifications to this channel will stop.', confirmLabel: 'Disconnect', destructive: true);
                           if (!c.confirmed || !context.mounted) return;
                           try {
                             await context.api.delete('/integrations/${i['provider']}');

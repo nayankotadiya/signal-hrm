@@ -288,6 +288,65 @@ class DemoBackend {
       if (path == '/auth/me') return _json(_getMe());
       if (path == '/dashboard') return _json(_getDashboard());
       if (path == '/attendance/today') return _json(_getTodayAttendance());
+      if (path == '/integrations') {
+        return _json([
+          {
+            'provider': 'slack',
+            'status': 'connected',
+            'available': true,
+            'webhookConfigured': true,
+            'connection': {
+              'id': 'conn-slack-1',
+              'name': 'Slack Attendance Alerts',
+              'status': 'connected',
+              'config': {
+                'channelName': '#attendance-alerts',
+                'notifyCheckIn': true,
+                'notifyCheckOut': true,
+                'notifyReminder': true,
+              },
+              'lastSyncAt': DateTime.now().subtract(const Duration(minutes: 15)).toIso8601String(),
+            },
+            'last24h': {'success': 18, 'failed': 0},
+          },
+          {
+            'provider': 'whatsapp',
+            'status': 'connected',
+            'available': true,
+            'webhookConfigured': true,
+            'connection': {
+              'id': 'conn-wa-1',
+              'name': 'WhatsApp Cloud Alerts',
+              'status': 'connected',
+              'config': {
+                'phoneNumberId': '108294729102941',
+                'recipientNumber': '+919876543210',
+                'notifyCheckIn': true,
+                'notifyCheckOut': true,
+                'notifyReminder': true,
+              },
+              'lastSyncAt': DateTime.now().subtract(const Duration(minutes: 42)).toIso8601String(),
+            },
+            'last24h': {'success': 14, 'failed': 0},
+          },
+          {
+            'provider': 'meta_leads',
+            'status': 'disabled',
+            'available': true,
+            'webhookConfigured': true,
+            'connection': null,
+            'last24h': {},
+          },
+          {
+            'provider': 'sms',
+            'status': 'disabled',
+            'available': false,
+            'webhookConfigured': false,
+            'connection': null,
+            'last24h': {},
+          },
+        ]);
+      }
       final hit = _fixtures['GET $path'];
       if (hit != null) return _json(hit);
       final found = _findInParentList(path);
@@ -384,6 +443,16 @@ class DemoBackend {
         'purpose': 'selfie',
         'createdAt': DateTime.now().toUtc().toIso8601String(),
       }, 201);
+    }
+
+    if (path.startsWith('/integrations/') && path.endsWith('/test')) {
+      final provider = path.split('/')[2];
+      return _json({
+        'success': true,
+        'message': provider == 'slack'
+            ? 'Test alert sent to Slack channel.'
+            : 'Test alert sent via WhatsApp.',
+      });
     }
 
     // Every other change is acknowledged but not stored.

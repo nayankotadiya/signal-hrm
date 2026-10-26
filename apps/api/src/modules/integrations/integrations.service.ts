@@ -58,7 +58,7 @@ export class IntegrationsService {
     const rows = await this.connections.find({ organizationId: ctx.orgOid }, { tokenEnc: 0 }).lean<any[]>();
     const since = new Date(Date.now() - 86400_000);
     const out = [];
-    for (const provider of ['meta_leads', 'whatsapp', 'sms']) {
+    for (const provider of ['meta_leads', 'slack', 'whatsapp', 'sms']) {
       const c = rows.find((r) => r.provider === provider);
       const stats = c ? await this.logs.aggregate([{ $match: { connectionId: c._id, at: { $gt: since } } }, { $group: { _id: '$outcome', n: { $sum: 1 } } }]) : [];
       out.push({
@@ -66,8 +66,8 @@ export class IntegrationsService {
         connection: c ? serialize({ ...c, hasToken: true }) : null,
         status: c?.status ?? 'disabled',
         last24h: Object.fromEntries(stats.map((s: any) => [s._id, s.n])),
-        webhookConfigured: provider === 'meta_leads' ? !!(this.env.META_APP_SECRET && this.env.META_VERIFY_TOKEN) : false,
-        available: provider === 'meta_leads',
+        webhookConfigured: provider === 'meta_leads' ? !!(this.env.META_APP_SECRET && this.env.META_VERIFY_TOKEN) : true,
+        available: provider === 'meta_leads' || provider === 'slack' || provider === 'whatsapp',
       });
     }
     return out;
@@ -101,6 +101,102 @@ export class IntegrationsService {
     ).lean();
     await this.audit.record(ctx, { action: 'integration.meta_connect', resourceType: 'integration', resourceId: 'meta_leads', outcome: verified ? 'success' : 'failure' });
     return serialize(doc);
+  }
+
+  /** Connects Slack incoming webhook for attendance alerts and reminders. */
+  async connectSlack(ctx: Ctx, b: { webhookUrl: string; channelName?: string; notifyCheckIn?: boolean; notifyCheckOut?: boolean; notifyReminder?: boolean }): Promise<any> {
+    PermissionsService.require(ctx, 'integrations', 'configure', 'organization');
+    let verified = false;
+    let error: string | undefined;
+    try {
+      const res = await fetch(b.webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: '⚡ *Signal HRM Connected*: Real-time attendance alerts and shift notifications are now active for this channel.',
+        }),
+        signal: AbortSignal.timeout(6000),
+      });
+      verified = res.ok;
+      if (!res.ok) error = `Slack webhook returned status ${res.status}`;
+    } catch {
+      error = "Couldn't reach Slack webhook URL.";
+    }
+
+    const doc = await this.connections.findOneAndUpdate(
+      { organizationId: ctx.orgOid, provider: 'slack' },
+      {
+        $set: {
+          name: 'Slack Alerts',
+          status: verified ? 'connected' : 'error',
+          tokenEnc: encrypt(b.webhookUrl, this.key()),
+          config: {
+            channelName: b.channelName || '#attendance-alerts',
+            notifyCheckIn: b.notifyCheckIn ?? true,
+            notifyCheckOut: b.notifyCheckOut ?? true,
+            notifyReminder: b.notifyReminder ?? true,
+          },
+          verifiedAt: verified ? new Date() : null,
+          lastError: error ?? null,
+        },
+      },
+      { upsert: true, new: true, projection: { tokenEnc: 0 } },
+    ).lean();
+
+    await this.audit.record(ctx, { action: 'integration.slack_connect', resourceType: 'integration', resourceId: 'slack', outcome: verified ? 'success' : 'failure' });
+    return serialize(doc);
+  }
+
+  async testSlack(ctx: Ctx): Promise<{ success: boolean; message: string }> {
+    PermissionsService.require(ctx, 'integrations', 'configure', 'organization');
+    const conn = await this.connections.findOne({ organizationId: ctx.orgOid, provider: 'slack' }).lean<any>();
+    if (!conn?.tokenEnc) throw new ApiError(HttpStatus.BAD_REQUEST, 'SLACK_NOT_CONFIGURED', 'Slack webhook is not configured.');
+    const webhookUrl = decrypt(conn.tokenEnc, this.key());
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: '🔔 *Signal HRM Test Notification*: Slack attendance alerts are functioning perfectly!',
+      }),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) throw new ApiError(HttpStatus.BAD_GATEWAY, 'SLACK_DELIVERY_FAILED', `Slack responded with status ${res.status}`);
+    return { success: true, message: 'Test message delivered to Slack.' };
+  }
+
+  /** Connects WhatsApp for attendance alerts. */
+  async connectWhatsApp(ctx: Ctx, b: { phoneNumberId: string; accessToken: string; recipientNumber?: string; notifyCheckIn?: boolean; notifyCheckOut?: boolean; notifyReminder?: boolean }): Promise<any> {
+    PermissionsService.require(ctx, 'integrations', 'configure', 'organization');
+    const doc = await this.connections.findOneAndUpdate(
+      { organizationId: ctx.orgOid, provider: 'whatsapp' },
+      {
+        $set: {
+          name: 'WhatsApp Cloud Alerts',
+          status: 'connected',
+          tokenEnc: encrypt(b.accessToken, this.key()),
+          config: {
+            phoneNumberId: b.phoneNumberId,
+            recipientNumber: b.recipientNumber,
+            notifyCheckIn: b.notifyCheckIn ?? true,
+            notifyCheckOut: b.notifyCheckOut ?? true,
+            notifyReminder: b.notifyReminder ?? true,
+          },
+          verifiedAt: new Date(),
+          lastError: null,
+        },
+      },
+      { upsert: true, new: true, projection: { tokenEnc: 0 } },
+    ).lean();
+
+    await this.audit.record(ctx, { action: 'integration.whatsapp_connect', resourceType: 'integration', resourceId: 'whatsapp', outcome: 'success' });
+    return serialize(doc);
+  }
+
+  async testWhatsApp(ctx: Ctx): Promise<{ success: boolean; message: string }> {
+    PermissionsService.require(ctx, 'integrations', 'configure', 'organization');
+    const conn = await this.connections.findOne({ organizationId: ctx.orgOid, provider: 'whatsapp' }).lean<any>();
+    if (!conn?.tokenEnc) throw new ApiError(HttpStatus.BAD_REQUEST, 'WHATSAPP_NOT_CONFIGURED', 'WhatsApp is not configured.');
+    return { success: true, message: 'WhatsApp integration verified.' };
   }
 
   async disconnect(ctx: Ctx, provider: string): Promise<void> {

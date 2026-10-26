@@ -7,7 +7,7 @@ import { C, Ctx, Public } from '../../common/auth/context';
 import { objectId, parse } from '../../common/http/validation';
 import { IntegrationsService } from './integrations.service';
 
-const PROVIDERS = z.enum(['meta_leads', 'whatsapp', 'sms']);
+const PROVIDERS = z.enum(['meta_leads', 'slack', 'whatsapp', 'sms']);
 
 @ApiTags('integrations')
 @Controller({ path: 'integrations', version: '1' })
@@ -33,6 +33,53 @@ export class IntegrationsController {
         body,
       ),
     );
+  }
+
+  @Put('slack')
+  connectSlack(@C() ctx: Ctx, @Body() body: unknown) {
+    return this.svc.connectSlack(
+      ctx,
+      parse(
+        z.object({
+          webhookUrl: z.string().trim().url(),
+          channelName: z.string().trim().max(100).optional(),
+          notifyCheckIn: z.boolean().optional(),
+          notifyCheckOut: z.boolean().optional(),
+          notifyReminder: z.boolean().optional(),
+        }),
+        body,
+      ),
+    );
+  }
+
+  @Post('slack/test')
+  @HttpCode(200)
+  testSlack(@C() ctx: Ctx) {
+    return this.svc.testSlack(ctx);
+  }
+
+  @Put('whatsapp')
+  connectWhatsApp(@C() ctx: Ctx, @Body() body: unknown) {
+    return this.svc.connectWhatsApp(
+      ctx,
+      parse(
+        z.object({
+          phoneNumberId: z.string().trim().max(50),
+          accessToken: z.string().trim().min(10).max(1000),
+          recipientNumber: z.string().trim().max(30).optional(),
+          notifyCheckIn: z.boolean().optional(),
+          notifyCheckOut: z.boolean().optional(),
+          notifyReminder: z.boolean().optional(),
+        }),
+        body,
+      ),
+    );
+  }
+
+  @Post('whatsapp/test')
+  @HttpCode(200)
+  testWhatsApp(@C() ctx: Ctx) {
+    return this.svc.testWhatsApp(ctx);
   }
 
   @Delete(':provider')

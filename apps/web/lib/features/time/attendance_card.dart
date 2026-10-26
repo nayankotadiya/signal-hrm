@@ -14,6 +14,7 @@ import '../../platform/geocoding.dart';
 import '../../widgets/async_view.dart';
 import '../../widgets/authed_image.dart';
 import '../../widgets/format.dart';
+import '../../widgets/geofence_map.dart';
 import '../../widgets/status.dart';
 
 class _CapturedSelfie {
@@ -96,6 +97,7 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
   final Map<String, String> _resolvedAddresses = {};
 
   bool _refreshingLocation = false;
+  bool _showGeofenceMap = false;
   String? _liveAddress;
   double? _liveDistanceMeters;
   bool? _isInsideGeofence;
@@ -1481,36 +1483,61 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                               ),
                             ],
                           ),
-                          InkWell(
-                            onTap: _refreshingLocation ? null : () => _refreshCurrentLocation(today),
-                            borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (_refreshingLocation)
-                                    SizedBox(
-                                      width: 12,
-                                      height: 12,
-                                      child: CircularProgressIndicator(strokeWidth: 2, color: t.accent),
-                                    )
-                                  else
-                                    Icon(Icons.refresh_rounded, size: 14, color: t.accent),
-                                  const SizedBox(width: 4),
-                                  Flexible(
-                                    child: Text(
-                                      _refreshingLocation ? 'Refreshing...' : 'Refresh location',
-                                      style: t.text.caption(weight: FontWeight.w700).copyWith(
-                                            color: t.accent,
-                                            fontSize: 11,
-                                          ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+                          Wrap(
+                            spacing: 4,
+                            runSpacing: 2,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              InkWell(
+                                onTap: () => setState(() => _showGeofenceMap = !_showGeofenceMap),
+                                borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(_showGeofenceMap ? Icons.map_rounded : Icons.radar_rounded, size: 14, color: t.accent),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        _showGeofenceMap ? 'Hide Map' : 'View Map',
+                                        style: t.text.caption(weight: FontWeight.w700).copyWith(
+                                              color: t.accent,
+                                              fontSize: 11,
+                                            ),
+                                      ),
+                                    ],
                                   ),
-                                ],
+                                ),
                               ),
-                            ),
+                              InkWell(
+                                onTap: _refreshingLocation ? null : () => _refreshCurrentLocation(today),
+                                borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (_refreshingLocation)
+                                        SizedBox(
+                                          width: 12,
+                                          height: 12,
+                                          child: CircularProgressIndicator(strokeWidth: 2, color: t.accent),
+                                        )
+                                      else
+                                        Icon(Icons.refresh_rounded, size: 14, color: t.accent),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        _refreshingLocation ? 'Refreshing...' : 'Refresh GPS',
+                                        style: t.text.caption(weight: FontWeight.w700).copyWith(
+                                              color: t.accent,
+                                              fontSize: 11,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -1617,10 +1644,62 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                           ],
                         ),
                       ],
+                      if (_showGeofenceMap) ...[
+                        const SizedBox(height: 10),
+                        GeofenceRadarMap(
+                          officeLat: (loc['latitude'] as num?)?.toDouble() ?? 23.0225,
+                          officeLng: (loc['longitude'] as num?)?.toDouble() ?? 72.5714,
+                          officeRadiusMeters: (loc['radiusMeters'] as num?)?.toDouble() ?? 100.0,
+                          officeName: loc['name'] as String? ?? 'Main Office',
+                          officeAddress: loc['address'] as String?,
+                          userLat: _lastFix?.latitude,
+                          userLng: _lastFix?.longitude,
+                          accuracyMeters: _lastFix?.accuracyMeters,
+                          isInside: _isInsideGeofence,
+                          isRefreshing: _refreshingLocation,
+                          onRefresh: () => _refreshCurrentLocation(today),
+                          height: 220,
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ],
+
+              // Evening Check-Out Reminder
+              if (isCheckedIn && DateTime.now().hour >= 18)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, bottom: 8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: t.amber.withValues(alpha: t.isDark ? 0.22 : 0.14),
+                      borderRadius: BorderRadius.circular(t.radiusCard),
+                      border: Border.all(color: t.amber.withValues(alpha: 0.5)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.alarm_on_rounded, size: 20, color: t.amber),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Shift End Reminder',
+                                style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.amber, fontSize: 11),
+                              ),
+                              Text(
+                                'Standard shift ends at 7:00 PM. Don\'t forget to Check Out when you leave!',
+                                style: t.text.caption().copyWith(fontSize: 10, color: t.ink),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
 
               if (_problem != null) _problemPanel(t, today),
               const SizedBox(height: 12),
