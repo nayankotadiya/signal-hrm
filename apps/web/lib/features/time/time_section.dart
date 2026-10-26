@@ -10,6 +10,7 @@ import '../../widgets/format.dart';
 import '../../widgets/section.dart';
 import '../../widgets/status.dart';
 import '../../platform/bridge.dart';
+import '../../widgets/attendance_heatmap.dart';
 import '../../widgets/authed_image.dart';
 import 'attendance_card.dart';
 import 'leave_tab.dart';
@@ -97,55 +98,20 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
   @override
   Widget build(BuildContext context) {
-    final t = NTokens.of(context);
     final me = context.me;
     final month = '${_month.year}-${_month.month.toString().padLeft(2, '0')}';
-    Color colorFor(String s) => switch (s) {
-          'present' => t.green,
-          'late' || 'half_day' => t.amber,
-          'absent' => t.red,
-          'on_leave' => t.accent,
-          'holiday' => t.teal,
-          'incomplete' || 'pending_correction' => t.amber,
-          _ => Colors.transparent,
-        };
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       CardGrid(minTileWidth: 380, children: [
         if (me.employeeId != null && me.can('attendance', 'create')) AttendanceTodayCard(onChanged: () => setState(() => _rev++)),
         if (me.employeeId != null)
-          InfoCard(
-            title: 'My month',
-            trailing: TextButton(onPressed: () => requestCorrection(context, onDone: () => setState(() => _rev++)), child: Text('Request correction', style: t.text.caption(color: t.ink, weight: FontWeight.w600))),
-            child: AsyncView<Json>(
-              reloadKey: '$month-$_rev',
-              load: () async => jsonMap(await context.api.get('/attendance/calendar', query: {'month': month})),
-              builder: (context, cal, _) {
-                final days = jsonList(cal['days']);
-                final summary = jsonMap(cal['summary']);
-                return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  NMonthCalendar(
-                    month: _month,
-                    weekStart: me.weekStart == 0 ? 7 : me.weekStart,
-                    onMonthChanged: (m) => setState(() => _month = m),
-                    marks: {
-                      for (final d in days)
-                        if (d['status'] != 'none' && d['status'] != 'weekly_off') '${d['day']}': [NCalendarMark(color: colorFor('${d['status']}'), label: Fmt.label(d['status']))],
-                    },
-                    onDayTap: (d) {
-                      final key = Fmt.day(d);
-                      final info = days.where((x) => x['day'] == key).toList();
-                      if (info.isEmpty) return;
-                      final i = info.first;
-                      NToast.of(context).show('${Fmt.date(key)}: ${Fmt.label(i['status'])}${(i['workedMinutes'] as num? ?? 0) > 0 ? ' · ${Fmt.minutes(i['workedMinutes'])}' : ''}${i['holiday'] != null ? ' · ${i['holiday']}' : ''}');
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(spacing: 8, runSpacing: 6, children: [
-                    for (final e in summary.entries)
-                      if (e.key != 'none') StatusChip(e.key, label: '${Fmt.label(e.key)}: ${e.value}'),
-                  ]),
-                ]);
-              },
+          AsyncView<Json>(
+            reloadKey: '$month-$_rev',
+            load: () async => jsonMap(await context.api.get('/attendance/calendar', query: {'month': month})),
+            builder: (context, cal, _) => AttendanceHeatmapDashboard(
+              calendarData: cal,
+              selectedMonth: _month,
+              onMonthChanged: (m) => setState(() => _month = m),
+              onRequestCorrection: () => requestCorrection(context, onDone: () => setState(() => _rev++)),
             ),
           ),
       ]),

@@ -13,6 +13,8 @@ import '../app/config.dart';
 import '../app/destinations.dart';
 import '../app/services.dart';
 import '../platform/bridge.dart';
+import '../platform/offline_sync.dart';
+import '../widgets/ai_assistant.dart';
 import '../widgets/brand.dart';
 import 'command_palette.dart';
 import '../app/preferences.dart';
@@ -41,6 +43,7 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshUnread();
+      OfflineSyncService.instance.bindApi(context.api);
       final token = context.api.token;
       if (token != null && token.isNotEmpty) {
         bridge.connectRealtime(context.api.baseUrl, token, _onRealtimeEvent);
@@ -141,6 +144,11 @@ class _AppShellState extends State<AppShell> {
                         maxItems: _maxBottomItems,
                       ),
                     ),
+                  Positioned(
+                    right: bp.isMobile ? 16 : 24,
+                    bottom: bp.isMobile ? (MediaQuery.paddingOf(context).bottom + 76) : 24,
+                    child: const AiAssistantFab(),
+                  ),
                 ]),
               ),
             ),
@@ -180,6 +188,7 @@ class _OfflineBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = NTokens.of(context);
+    final count = OfflineSyncService.instance.count;
     return Semantics(
       liveRegion: true,
       child: Container(
@@ -189,7 +198,22 @@ class _OfflineBar extends StatelessWidget {
         child: Row(children: [
           Icon(Icons.wifi_off_rounded, size: 16, color: t.ink),
           const SizedBox(width: 8),
-          Expanded(child: Text("You're offline. Changes won't be saved until you reconnect.", style: t.text.caption(color: t.ink))),
+          Expanded(
+            child: Text(
+              count > 0
+                  ? "You're offline. $count attendance punch(es) queued and will auto-sync upon reconnection."
+                  : "You're offline. Attendance punches will be queued locally and auto-synced.",
+              style: t.text.caption(color: t.ink),
+            ),
+          ),
+          if (count > 0)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: InkWell(
+                onTap: () => OfflineSyncService.instance.syncAll(context.api),
+                child: Text('Sync', style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.accent, decoration: TextDecoration.underline)),
+              ),
+            ),
         ]),
       ),
     );
