@@ -1,6 +1,7 @@
 // Browser implementation of [PlatformBridge]. Only compiled for the web.
 // ignore_for_file: non_constant_identifier_names
 import 'dart:async';
+import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:math';
 import 'dart:typed_data';
@@ -13,6 +14,21 @@ import 'package:web/web.dart' as web;
 import 'bridge.dart';
 
 PlatformBridge create() => WebBridge();
+
+@JS('SignalPermissions.detectDevice')
+external JSString _signalPermissionsDetectDevice();
+
+@JS('SignalPermissions.checkStatus')
+external JSPromise<JSString> _signalPermissionsCheckStatus();
+
+@JS('SignalPermissions.requestLocation')
+external JSPromise<JSString> _signalPermissionsRequestLocation();
+
+@JS('SignalPermissions.requestNotifications')
+external JSPromise<JSString> _signalPermissionsRequestNotifications();
+
+@JS('SignalPermissions.requestCamera')
+external JSPromise<JSString> _signalPermissionsRequestCamera();
 
 @JS('google.accounts.id.initialize')
 external void _gInitialize(_GConfig config);
@@ -308,5 +324,73 @@ class WebBridge implements PlatformBridge {
     try {
       _signalRealtimeDisconnect();
     } catch (_) {}
+  }
+
+  @override
+  Map<String, dynamic> detectDevice() {
+    try {
+      final jsonStr = _signalPermissionsDetectDevice().toDart;
+      return (jsonDecode(jsonStr) as Map).cast<String, dynamic>();
+    } catch (_) {
+      return {'os': 'Unknown', 'browser': 'Browser', 'isMobile': false, 'isPwa': false};
+    }
+  }
+
+  @override
+  Future<PermissionStatusReport> checkPermissions() async {
+    final dev = detectDevice();
+    try {
+      final jsStr = await _signalPermissionsCheckStatus().toDart;
+      final map = (jsonDecode(jsStr.toDart) as Map).cast<String, dynamic>();
+      return PermissionStatusReport(
+        location: AppPermissionState.fromString(map['location'] as String?),
+        notifications: AppPermissionState.fromString(map['notifications'] as String?),
+        camera: AppPermissionState.fromString(map['camera'] as String?),
+        os: dev['os'] as String? ?? 'Unknown',
+        browser: dev['browser'] as String? ?? 'Browser',
+        isMobile: dev['isMobile'] == true,
+        isPwa: dev['isPwa'] == true,
+      );
+    } catch (_) {
+      return PermissionStatusReport(
+        location: AppPermissionState.prompt,
+        notifications: AppPermissionState.prompt,
+        camera: AppPermissionState.prompt,
+        os: dev['os'] as String? ?? 'Unknown',
+        browser: dev['browser'] as String? ?? 'Browser',
+        isMobile: dev['isMobile'] == true,
+        isPwa: dev['isPwa'] == true,
+      );
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> requestLocationPermission() async {
+    try {
+      final jsStr = await _signalPermissionsRequestLocation().toDart;
+      return (jsonDecode(jsStr.toDart) as Map).cast<String, dynamic>();
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  @override
+  Future<String> requestNotificationPermission() async {
+    try {
+      final jsStr = await _signalPermissionsRequestNotifications().toDart;
+      return jsStr.toDart;
+    } catch (_) {
+      return 'denied';
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> requestCameraPermission() async {
+    try {
+      final jsStr = await _signalPermissionsRequestCamera().toDart;
+      return (jsonDecode(jsStr.toDart) as Map).cast<String, dynamic>();
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
   }
 }

@@ -73,6 +73,57 @@ abstract class PlatformBridge {
 
   /// Disconnects the real-time WebSocket connection.
   void disconnectRealtime();
+
+  /// Checks the current state of GPS, Notifications, and Camera permissions.
+  Future<PermissionStatusReport> checkPermissions();
+
+  /// Prompts the user to grant high-accuracy GPS location permission.
+  Future<Map<String, dynamic>> requestLocationPermission();
+
+  /// Prompts the user to grant Web Push notification permissions.
+  Future<String> requestNotificationPermission();
+
+  /// Tests or prompts for camera / selfie capture access.
+  Future<Map<String, dynamic>> requestCameraPermission();
+
+  /// Detects the user's OS, browser, mobile status, and PWA mode.
+  Map<String, dynamic> detectDevice();
+}
+
+enum AppPermissionState {
+  granted,
+  prompt,
+  denied,
+  unsupported;
+
+  static AppPermissionState fromString(String? val) {
+    return switch (val) {
+      'granted' => AppPermissionState.granted,
+      'denied' => AppPermissionState.denied,
+      'unsupported' => AppPermissionState.unsupported,
+      _ => AppPermissionState.prompt,
+    };
+  }
+}
+
+class PermissionStatusReport {
+  const PermissionStatusReport({
+    required this.location,
+    required this.notifications,
+    required this.camera,
+    required this.os,
+    required this.browser,
+    required this.isMobile,
+    required this.isPwa,
+  });
+
+  final AppPermissionState location;
+  final AppPermissionState notifications;
+  final AppPermissionState camera;
+  final String os;
+  final String browser;
+  final bool isMobile;
+  final bool isPwa;
 }
 
 final PlatformBridge bridge = impl.create();

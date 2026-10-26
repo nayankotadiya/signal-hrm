@@ -159,6 +159,146 @@
     }
   };
 
+  window.SignalPermissions = {
+    detectDevice: function () {
+      var ua = navigator.userAgent || '';
+      var os = 'Unknown';
+      var browser = 'Browser';
+      var isMobile = false;
+
+      if (/iPhone|iPad|iPod/i.test(ua)) {
+        os = 'iOS';
+        isMobile = true;
+      } else if (/Android/i.test(ua)) {
+        os = 'Android';
+        isMobile = true;
+      } else if (/Macintosh|Mac OS X/i.test(ua)) {
+        os = 'macOS';
+      } else if (/Windows/i.test(ua)) {
+        os = 'Windows';
+      } else if (/Linux/i.test(ua)) {
+        os = 'Linux';
+      }
+
+      if (/Edg\//i.test(ua)) {
+        browser = 'Edge';
+      } else if (/Chrome\//i.test(ua) && !/Edg\//i.test(ua)) {
+        browser = 'Chrome';
+      } else if (/Safari\//i.test(ua) && !/Chrome\//i.test(ua)) {
+        browser = 'Safari';
+      } else if (/Firefox\//i.test(ua)) {
+        browser = 'Firefox';
+      }
+
+      return JSON.stringify({
+        os: os,
+        browser: browser,
+        isMobile: isMobile,
+        isPwa: window.matchMedia && window.matchMedia('(display-mode: standalone)').matches,
+        userAgent: ua
+      });
+    },
+
+    checkStatus: async function () {
+      var loc = 'prompt';
+      if (!('geolocation' in navigator)) {
+        loc = 'unsupported';
+      } else if (navigator.permissions && navigator.permissions.query) {
+        try {
+          var res = await navigator.permissions.query({ name: 'geolocation' });
+          loc = res.state; // 'granted', 'prompt', 'denied'
+        } catch (_) {
+          loc = 'prompt';
+        }
+      }
+
+      var notif = 'prompt';
+      if (!('Notification' in window)) {
+        notif = 'unsupported';
+      } else if (Notification.permission === 'granted') {
+        notif = 'granted';
+      } else if (Notification.permission === 'denied') {
+        notif = 'denied';
+      } else {
+        notif = 'prompt';
+      }
+
+      var cam = 'prompt';
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        cam = 'unsupported';
+      } else if (navigator.permissions && navigator.permissions.query) {
+        try {
+          var camRes = await navigator.permissions.query({ name: 'camera' });
+          cam = camRes.state;
+        } catch (_) {
+          cam = 'prompt';
+        }
+      }
+
+      return JSON.stringify({
+        location: loc,
+        notifications: notif,
+        camera: cam
+      });
+    },
+
+    requestLocation: function () {
+      return new Promise(function (resolve) {
+        if (!('geolocation' in navigator)) {
+          resolve(JSON.stringify({ ok: false, reason: 'unsupported' }));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          function (pos) {
+            resolve(JSON.stringify({
+              ok: true,
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: pos.coords.accuracy
+            }));
+          },
+          function (err) {
+            resolve(JSON.stringify({
+              ok: false,
+              code: err.code, // 1: denied, 2: unavailable, 3: timeout
+              message: err.message
+            }));
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+      });
+    },
+
+    requestNotifications: async function () {
+      if (!('Notification' in window)) {
+        return 'unsupported';
+      }
+      try {
+        var res = await Notification.requestPermission();
+        return res; // 'granted', 'denied', 'default'
+      } catch (e) {
+        return 'denied';
+      }
+    },
+
+    requestCamera: function () {
+      return new Promise(function (resolve) {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          resolve(JSON.stringify({ ok: false, reason: 'unsupported' }));
+          return;
+        }
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
+          .then(function (stream) {
+            stream.getTracks().forEach(function (t) { t.stop(); });
+            resolve(JSON.stringify({ ok: true }));
+          })
+          .catch(function (err) {
+            resolve(JSON.stringify({ ok: false, name: err.name, message: err.message }));
+          });
+      });
+    }
+  };
+
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       window.SignalPush.registerServiceWorker();

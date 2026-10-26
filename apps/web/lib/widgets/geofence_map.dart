@@ -36,6 +36,7 @@ class GeofenceRadarMap extends StatefulWidget {
     this.isRefreshing = false,
     this.onRefresh,
     this.onSetOfficeLocation,
+    this.onOpenPermissions,
     this.height = 240,
     this.initialZoom = 16,
   });
@@ -54,6 +55,7 @@ class GeofenceRadarMap extends StatefulWidget {
   final bool isRefreshing;
   final VoidCallback? onRefresh;
   final VoidCallback? onSetOfficeLocation;
+  final VoidCallback? onOpenPermissions;
   final double height;
   final int initialZoom;
 
@@ -268,8 +270,11 @@ class _GeofenceRadarMapState extends State<GeofenceRadarMap> with SingleTickerPr
               Positioned(
                 top: 8,
                 left: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: InkWell(
+                  onTap: widget.onOpenPermissions,
+                  borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: (t.isDark ? const Color(0xDD0F172A) : const Color(0xF0FFFFFF)),
                     borderRadius: BorderRadius.circular(NTokens.radiusPill),
@@ -314,6 +319,7 @@ class _GeofenceRadarMapState extends State<GeofenceRadarMap> with SingleTickerPr
                   ),
                 ),
               ),
+            ),
 
               // 4. Top-Right: Map Controls (Layer Toggle, Zoom, Compass)
               Positioned(
@@ -459,6 +465,18 @@ class _GeofenceRadarMapState extends State<GeofenceRadarMap> with SingleTickerPr
                             ),
                           ),
                           const SizedBox(width: 6),
+
+                          if (widget.userLat == null && widget.onOpenPermissions != null) ...[
+                            _MapActionButton(
+                              icon: Icons.security_rounded,
+                              label: isCompact ? null : 'Permissions',
+                              tooltip: 'Device GPS & Permissions Setup',
+                              onTap: widget.onOpenPermissions,
+                              isDark: t.isDark,
+                              accentColor: t.amber,
+                            ),
+                            const SizedBox(width: 4),
+                          ],
 
                           // Refresh GPS button
                           if (widget.onRefresh != null) ...[

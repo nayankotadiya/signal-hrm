@@ -15,6 +15,7 @@ import '../../widgets/async_view.dart';
 import '../../widgets/authed_image.dart';
 import '../../widgets/format.dart';
 import '../../widgets/geofence_map.dart';
+import '../../widgets/permissions_dialog.dart';
 import '../../widgets/set_office_location_dialog.dart';
 import '../../widgets/status.dart';
 
@@ -1573,6 +1574,30 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                                   ),
                                 ),
                               ),
+                              InkWell(
+                                onTap: () => showPermissionsSetupDialog(
+                                  context,
+                                  onPermissionsChanged: () => _refreshCurrentLocation(today),
+                                ),
+                                borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.verified_user_outlined, size: 14, color: t.accent),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Permissions',
+                                        style: t.text.caption(weight: FontWeight.w700).copyWith(
+                                              color: t.accent,
+                                              fontSize: 11,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
                         ],
@@ -1666,18 +1691,61 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                           ),
                         ),
                       ] else if (_liveLocationError != null) ...[
-                        const SizedBox(height: 6),
-                        Row(
-                          children: [
-                            Icon(Icons.warning_amber_rounded, size: 13, color: t.red),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                _liveLocationError!,
-                                style: t.text.caption(color: t.red).copyWith(fontSize: 10),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: t.red.withValues(alpha: t.isDark ? 0.20 : 0.10),
+                            borderRadius: BorderRadius.circular(t.radiusTile),
+                            border: Border.all(color: t.red.withValues(alpha: 0.4)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.warning_amber_rounded, size: 14, color: t.red),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      _liveLocationError!,
+                                      style: t.text.caption(color: t.red).copyWith(fontWeight: FontWeight.w600, fontSize: 10.5),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 6),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: InkWell(
+                                  onTap: () => showPermissionsSetupDialog(
+                                    context,
+                                    onPermissionsChanged: () => _refreshCurrentLocation(today),
+                                  ),
+                                  borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: t.accent.withValues(alpha: 0.18),
+                                      borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                                      border: Border.all(color: t.accent.withValues(alpha: 0.5)),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.security_rounded, size: 12, color: t.accent),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'Fix Permissions & GPS Setup',
+                                          style: TextStyle(color: t.accent, fontWeight: FontWeight.w700, fontSize: 10),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                       if (_showGeofenceMap) ...[
@@ -1695,6 +1763,10 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                           isRefreshing: _refreshingLocation,
                           onRefresh: () => _refreshCurrentLocation(today),
                           onSetOfficeLocation: () => _openSetOfficeLocation(loc, today),
+                          onOpenPermissions: () => showPermissionsSetupDialog(
+                            context,
+                            onPermissionsChanged: () => _refreshCurrentLocation(today),
+                          ),
                           height: 230,
                         ),
                       ],

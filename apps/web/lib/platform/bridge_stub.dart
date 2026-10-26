@@ -73,4 +73,37 @@ class StubBridge implements PlatformBridge {
 
   @override
   void disconnectRealtime() {}
+
+  @override
+  Future<PermissionStatusReport> checkPermissions() async {
+    return const PermissionStatusReport(
+      location: AppPermissionState.granted,
+      notifications: AppPermissionState.granted,
+      camera: AppPermissionState.granted,
+      os: 'Windows',
+      browser: 'Chrome',
+      isMobile: false,
+      isPwa: false,
+    );
+  }
+
+  @override
+  Future<Map<String, dynamic>> requestLocationPermission() async {
+    return {'ok': true, 'lat': 23.0225, 'lng': 72.5714, 'accuracy': 12.0};
+  }
+
+  @override
+  Future<String> requestNotificationPermission() async {
+    return 'granted';
+  }
+
+  @override
+  Future<Map<String, dynamic>> requestCameraPermission() async {
+    return {'ok': true};
+  }
+
+  @override
+  Map<String, dynamic> detectDevice() {
+    return {'os': 'Windows', 'browser': 'Chrome', 'isMobile': false, 'isPwa': false};
+  }
 }

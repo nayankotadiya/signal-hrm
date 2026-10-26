@@ -16,6 +16,7 @@ import '../platform/bridge.dart';
 import '../platform/offline_sync.dart';
 import '../widgets/ai_assistant.dart';
 import '../widgets/brand.dart';
+import '../widgets/permissions_dialog.dart';
 import 'command_palette.dart';
 import '../app/preferences.dart';
 import '../l10n/gen/app_localizations.dart';
@@ -254,6 +255,12 @@ class _TopBar extends StatelessWidget {
         icon: dark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
         label: dark ? l.topThemeToLight : l.topThemeToDark,
         onPressed: () => prefs.update((p) => p.copyWith(appearance: dark ? NAppearance.light : NAppearance.dark)),
+      ),
+      SizedBox(width: gap),
+      NIconButton(
+        icon: Icons.security_rounded,
+        label: 'Device & GPS Permissions',
+        onPressed: () => showPermissionsSetupDialog(context),
       ),
       SizedBox(width: gap),
       NIconButton(icon: Icons.search_rounded, label: l.topSearchHint, onPressed: onSearch),
