@@ -95,6 +95,12 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
   String? _checkOutAddress;
   final Map<String, String> _resolvedAddresses = {};
 
+  bool _refreshingLocation = false;
+  String? _liveAddress;
+  double? _liveDistanceMeters;
+  bool? _isInsideGeofence;
+  String? _liveLocationError;
+
   @override
   void initState() {
     super.initState();
@@ -324,6 +330,93 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     return r * c;
   }
 
+  Future<void> _refreshCurrentLocation(Json today) async {
+    if (_refreshingLocation) return;
+    setState(() {
+      _refreshingLocation = true;
+      _liveLocationError = null;
+    });
+
+    try {
+      GeoReading? fix;
+      try {
+        fix = await bridge.currentPosition();
+      } on GeoException catch (g) {
+        final msg = switch (g.failure) {
+          GeoFailure.denied => 'Location access was denied. Please allow location permissions in your browser.',
+          GeoFailure.timeout => 'Location request timed out. Please try again.',
+          _ => 'GPS location is unavailable on this device.',
+        };
+        _liveLocationError = msg;
+      } catch (e) {
+        _liveLocationError = 'Could not get location: $e';
+      }
+
+      if (AppConfig.demo && fix == null) {
+        fix = const GeoReading(latitude: 23.0225, longitude: 72.5714, accuracyMeters: 12);
+      }
+
+      if (fix != null) {
+        _lastFix = fix;
+        _lastStatus = 'granted';
+        final loc = jsonMap(today['location']);
+        double? dist;
+        bool? inside;
+        if (loc['latitude'] != null && loc['longitude'] != null) {
+          dist = _haversineMeters(
+            fix.latitude,
+            fix.longitude,
+            (loc['latitude'] as num).toDouble(),
+            (loc['longitude'] as num).toDouble(),
+          );
+          final radius = (loc['radiusMeters'] as num?)?.toDouble() ?? 100.0;
+          inside = dist <= radius;
+        }
+
+        final resolved = await Geocoding.reverseGeocode(
+          fix.latitude,
+          fix.longitude,
+          fallbackAddress: loc['address'] as String?,
+          fallbackLocationName: loc['name'] as String?,
+        );
+
+        if (!mounted) return;
+        setState(() {
+          _liveDistanceMeters = dist;
+          _isInsideGeofence = inside;
+          _liveAddress = resolved;
+          _refreshingLocation = false;
+        });
+
+        final locName = loc['name'] as String? ?? 'Office';
+        if (dist != null && inside != null) {
+          if (inside) {
+            NToast.of(context).show('Location refreshed: Inside $locName area (${dist.round()}m away)');
+          } else {
+            final radius = (loc['radiusMeters'] as num?)?.toDouble() ?? 100.0;
+            NToast.of(context).show('Location refreshed: ${dist.round()}m from $locName (limit ${radius.round()}m)');
+          }
+        } else {
+          NToast.of(context).show('Location refreshed: $resolved');
+        }
+      } else {
+        if (!mounted) return;
+        setState(() => _refreshingLocation = false);
+        if (_liveLocationError != null) {
+          NToast.of(context).show(_liveLocationError!);
+        }
+      }
+    } catch (e) {
+      if (!mounted) return;
+      final msg = 'Failed to fetch location: $e';
+      setState(() {
+        _liveLocationError = msg;
+        _refreshingLocation = false;
+      });
+      NToast.of(context).show(msg);
+    }
+  }
+
   Future<void> _requestException(Json today) async {
     final r = await showNConfirm(
       context,
@@ -359,6 +452,14 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
         },
         message: [e.message, ...details].join('\n'),
         action: Wrap(direction: Axis.vertical, spacing: 6, children: [
+          NButton(
+            label: 'Refresh location',
+            icon: Icons.my_location_rounded,
+            compact: true,
+            variant: NButtonVariant.secondary,
+            busy: _refreshingLocation,
+            onPressed: () => _refreshCurrentLocation(today),
+          ),
           if (e.code != 'NO_EMPLOYEE' && e.code != 'EMPLOYEE_INACTIVE') NButton(label: 'Try again', compact: true, variant: NButtonVariant.secondary, onPressed: () => _punch(today)),
           if (allowRemote) NButton(label: 'Record as remote', compact: true, variant: NButtonVariant.secondary, onPressed: () => _punch(today, remote: true)),
           if (exceptionAvailable) NButton(label: 'Request exception', compact: true, onPressed: () => _requestException(today)),
@@ -1347,16 +1448,179 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
               // Shift Schedule & Punch Details
               _buildShiftSchedule(t, state, rec, today, dayCount, isMobile),
 
-              // Work location row
-              if (!widget.compact)
-                NInfoRow(
-                  label: 'Work location',
-                  value: loc.isEmpty
-                      ? 'Main Office'
-                      : (loc['address'] != null && (loc['address'] as String).isNotEmpty
-                          ? '${loc['name']} · ${loc['address']} (within ${loc['radiusMeters'] ?? 100} m)'
-                          : '${loc['name']} (within ${loc['radiusMeters'] ?? 100} m)'),
+              // Work location & Real-time GPS verification panel with Refresh Location button
+              if (!widget.compact) ...[
+                Container(
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: t.pillTrack.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(t.radiusCard),
+                    border: Border.all(color: t.cardBorder),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Wrap(
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.business_rounded, size: 16, color: t.accent),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  'Work Location',
+                                  style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.ink),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          InkWell(
+                            onTap: _refreshingLocation ? null : () => _refreshCurrentLocation(today),
+                            borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (_refreshingLocation)
+                                    SizedBox(
+                                      width: 12,
+                                      height: 12,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: t.accent),
+                                    )
+                                  else
+                                    Icon(Icons.refresh_rounded, size: 14, color: t.accent),
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: Text(
+                                      _refreshingLocation ? 'Refreshing...' : 'Refresh location',
+                                      style: t.text.caption(weight: FontWeight.w700).copyWith(
+                                            color: t.accent,
+                                            fontSize: 11,
+                                          ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        loc.isEmpty
+                            ? 'Main Office'
+                            : (loc['address'] != null && (loc['address'] as String).isNotEmpty
+                                ? '${loc['name']} · ${loc['address']} (allowed radius ${loc['radiusMeters'] ?? 100} m)'
+                                : '${loc['name']} (allowed radius ${loc['radiusMeters'] ?? 100} m)'),
+                        style: t.text.caption(color: t.muted),
+                      ),
+                      if (_lastFix != null || _liveAddress != null) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: (_isInsideGeofence == true ? t.green : t.amber).withValues(alpha: t.isDark ? 0.20 : 0.12),
+                            borderRadius: BorderRadius.circular(t.radiusTile),
+                            border: Border.all(
+                              color: (_isInsideGeofence == true ? t.green : t.amber).withValues(alpha: 0.4),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    _isInsideGeofence == true ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+                                    size: 14,
+                                    color: _isInsideGeofence == true ? t.green : t.amber,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      _isInsideGeofence == true
+                                          ? 'Inside office area · ${_liveDistanceMeters?.round() ?? 0}m away'
+                                          : (_liveDistanceMeters != null
+                                              ? 'Outside office area · ${_liveDistanceMeters!.round()}m away (allowed ${loc['radiusMeters'] ?? 100}m)'
+                                              : 'Current location detected'),
+                                      style: t.text.caption(weight: FontWeight.w700).copyWith(
+                                            color: _isInsideGeofence == true ? t.green : t.amber,
+                                            fontSize: 11,
+                                          ),
+                                    ),
+                                  ),
+                                  if (_lastFix != null)
+                                    Text(
+                                      '±${_lastFix!.accuracyMeters.round()}m',
+                                      style: t.text.caption(color: t.muted).copyWith(fontSize: 10),
+                                    ),
+                                ],
+                              ),
+                              if (_liveAddress != null && _liveAddress!.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Icon(Icons.place_outlined, size: 12, color: t.muted),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        _liveAddress!,
+                                        style: t.text.caption().copyWith(fontSize: 10, color: t.ink),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                              if (_lastFix != null) ...[
+                                const SizedBox(height: 2),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: InkWell(
+                                    onTap: () => bridge.openUrl('https://www.google.com/maps?q=${_lastFix!.latitude},${_lastFix!.longitude}'),
+                                    child: Text(
+                                      'View current GPS on Map',
+                                      style: t.text.caption(weight: FontWeight.w600).copyWith(
+                                            color: t.accent,
+                                            fontSize: 10,
+                                            decoration: TextDecoration.underline,
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ] else if (_liveLocationError != null) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Icon(Icons.warning_amber_rounded, size: 13, color: t.red),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                _liveLocationError!,
+                                style: t.text.caption(color: t.red).copyWith(fontSize: 10),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
+              ],
 
               if (_problem != null) _problemPanel(t, today),
               const SizedBox(height: 12),
@@ -1451,10 +1715,35 @@ class _SelfieSheet extends StatefulWidget {
 class _SelfieSheetState extends State<_SelfieSheet> {
   PickedFile? _picked;
   bool _busy = false;
+  bool _refreshingLoc = false;
+  late String? _displayLoc = widget.locationAddress ?? widget.locationName;
 
   @override
   void initState() {
     super.initState();
+  }
+
+  Future<void> _refreshLocation() async {
+    if (_refreshingLoc) return;
+    setState(() => _refreshingLoc = true);
+    try {
+      final fix = await bridge.currentPosition();
+      final addr = await Geocoding.reverseGeocode(
+        fix.latitude,
+        fix.longitude,
+        fallbackAddress: widget.locationAddress,
+        fallbackLocationName: widget.locationName,
+      );
+      if (mounted) {
+        setState(() {
+          _displayLoc = addr;
+          _refreshingLoc = false;
+        });
+        NToast.of(context).show('Location refreshed: $addr');
+      }
+    } catch (_) {
+      if (mounted) setState(() => _refreshingLoc = false);
+    }
   }
 
   Future<void> _takePhoto() async {
@@ -1476,7 +1765,6 @@ class _SelfieSheetState extends State<_SelfieSheet> {
     final t = NTokens.of(context);
     final actionName = widget.stepTitle ?? (widget.isCheckIn ? 'Check in' : 'Check out');
     final isMobile = NBreakpoint.of(context).isMobile;
-    final displayLoc = widget.locationAddress ?? widget.locationName;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -1506,14 +1794,28 @@ class _SelfieSheetState extends State<_SelfieSheet> {
                   ],
                 ),
               ),
-              if (displayLoc != null) ...[
+              if (_displayLoc != null) ...[
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '📍 $displayLoc',
+                    '📍 $_displayLoc',
                     style: t.text.caption().copyWith(color: t.muted),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                InkWell(
+                  onTap: _refreshingLoc ? null : _refreshLocation,
+                  borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: _refreshingLoc
+                        ? SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: t.accent),
+                          )
+                        : Icon(Icons.refresh_rounded, size: 14, color: t.accent),
                   ),
                 ),
               ],
