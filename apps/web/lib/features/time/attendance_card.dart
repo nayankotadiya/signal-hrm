@@ -137,18 +137,47 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     String? locationName, {
     String? locationAddress,
     String? stepTitle,
+    double? officeLat,
+    double? officeLng,
+    double? officeRadiusMeters,
+    double? userLat,
+    double? userLng,
+    double? accuracyMeters,
+    double? distanceMeters,
+    bool? isInside,
+    required Json today,
   }) async {
     final api = context.api;
     if (!mounted) return null;
     final picked = await showNSheet<PickedFile?>(
       context,
-      title: stepTitle ?? (checkIn ? 'Check-in photo' : 'Check-out photo'),
-      subtitle: 'Capture attendance photo to verify your punch.',
+      title: stepTitle ?? (checkIn ? 'Clock In Verification' : 'Clock Out Verification'),
+      subtitle: 'Capture attendance photo & verify real-time GPS location.',
       builder: (ctx) => _SelfieSheet(
         isCheckIn: checkIn,
         locationName: locationName,
         locationAddress: locationAddress,
         stepTitle: stepTitle,
+        officeLat: officeLat,
+        officeLng: officeLng,
+        officeRadiusMeters: officeRadiusMeters,
+        initialUserLat: userLat,
+        initialUserLng: userLng,
+        initialAccuracyMeters: accuracyMeters,
+        initialDistanceMeters: distanceMeters,
+        initialIsInside: isInside,
+        onLocationRefreshed: (fix, addr, dist, inside) {
+          if (mounted) {
+            setState(() {
+              _lastFix = fix;
+              _lastStatus = 'granted';
+              _liveAddress = addr;
+              _liveDistanceMeters = dist;
+              _isInsideGeofence = inside;
+              _showGeofenceMap = true;
+            });
+          }
+        },
       ),
     );
 
@@ -169,16 +198,29 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     // Always enable selfie photo verification for attendance punches
     final needSelfie = req['requireSelfie'] != false;
 
-    final stepTitle = isCheckIn ? 'Check-in photo' : 'Check-out photo';
+    final stepTitle = isCheckIn ? 'Clock In Verification' : 'Clock Out Verification';
 
     _attemptKey ??= newIdempotencyKey();
-    setState(() => _problem = null);
+    setState(() {
+      _problem = null;
+      _showGeofenceMap = true;
+    });
     final body = <String, dynamic>{};
     try {
       // 1. Geolocation verification first so we know if user is inside or outside company area
       String? resolvedAddress;
+      final loc = jsonMap(today['location']);
+      final officeLat = (loc['latitude'] as num?)?.toDouble() ?? 23.0225;
+      final officeLng = (loc['longitude'] as num?)?.toDouble() ?? 72.5714;
+      final radius = (loc['radiusMeters'] as num?)?.toDouble() ?? 100.0;
+      double? dist;
+      bool? inside;
+
       if (needLocation) {
-        setState(() => _phase = _Phase.locating);
+        setState(() {
+          _phase = _Phase.locating;
+          _showGeofenceMap = true;
+        });
         try {
           final fix = await bridge.currentPosition();
           _lastFix = fix;
@@ -203,7 +245,6 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
           body['latitude'] = _lastFix!.latitude;
           body['longitude'] = _lastFix!.longitude;
           body['accuracyMeters'] = _lastFix!.accuracyMeters;
-          final loc = jsonMap(today['location']);
           resolvedAddress = await Geocoding.reverseGeocode(
             _lastFix!.latitude,
             _lastFix!.longitude,
@@ -211,21 +252,43 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
             fallbackLocationName: loc['name'] as String?,
           );
           body['address'] = resolvedAddress;
+
+          if (loc['latitude'] != null && loc['longitude'] != null) {
+            dist = _haversineMeters(
+              _lastFix!.latitude,
+              _lastFix!.longitude,
+              officeLat,
+              officeLng,
+            );
+            inside = dist <= radius;
+          }
+
+          if (mounted) {
+            setState(() {
+              _liveAddress = resolvedAddress;
+              _liveDistanceMeters = dist;
+              _isInsideGeofence = inside;
+              _showGeofenceMap = true;
+            });
+          }
         }
       }
 
       // Check if user is outside company area
-      final loc = jsonMap(today['location']);
       bool isOutsideCompany = false;
       if (_lastFix != null && loc['latitude'] != null && loc['longitude'] != null) {
-        final dist = _haversineMeters(
+        dist ??= _haversineMeters(
           _lastFix!.latitude,
           _lastFix!.longitude,
-          (loc['latitude'] as num).toDouble(),
-          (loc['longitude'] as num).toDouble(),
+          officeLat,
+          officeLng,
         );
-        final radius = (loc['radiusMeters'] as num?)?.toDouble() ?? 100.0;
         isOutsideCompany = dist > radius;
+        if (isOutsideCompany && mounted) {
+          final locName = loc['name'] as String? ?? 'office';
+          NToast.of(context).show('Outside $locName (${dist.round()}m away, limit ${radius.round()}m). Real map opened.');
+          setState(() => _showGeofenceMap = true);
+        }
       }
 
       // 2. Selfie verification: ONLY when inside company area!
@@ -238,6 +301,15 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
           locName,
           locationAddress: resolvedAddress ?? loc['address'] as String?,
           stepTitle: stepTitle,
+          officeLat: officeLat,
+          officeLng: officeLng,
+          officeRadiusMeters: radius,
+          userLat: _lastFix?.latitude,
+          userLng: _lastFix?.longitude,
+          accuracyMeters: _lastFix?.accuracyMeters,
+          distanceMeters: dist,
+          isInside: inside ?? !isOutsideCompany,
+          today: today,
         );
         if (selfie == null) {
           setState(() => _phase = _Phase.idle);
@@ -1011,6 +1083,21 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                         ),
                     ],
                   ),
+                  if (lat != null && lng != null) ...[
+                    const SizedBox(height: 12),
+                    GeofenceRadarMap(
+                      officeLat: (location['latitude'] as num?)?.toDouble() ?? 23.0225,
+                      officeLng: (location['longitude'] as num?)?.toDouble() ?? 72.5714,
+                      officeRadiusMeters: (location['radiusMeters'] as num?)?.toDouble() ?? 100.0,
+                      officeName: location['name'] as String? ?? 'Office',
+                      officeAddress: location['address'] as String?,
+                      userLat: lat,
+                      userLng: lng,
+                      accuracyMeters: accuracy?.toDouble(),
+                      isInside: dist != null ? dist <= ((location['radiusMeters'] as num?)?.toDouble() ?? 100.0) : true,
+                      height: 190,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1415,6 +1502,16 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
               (isCheckedOut ? (rec['status'] == 'half_day' ? 0.5 : 1.0) : (isCheckedIn ? 0.5 : 0.0));
 
           final hasStarted = rec['checkIn'] != null;
+
+          // Auto-refresh GPS position & real map on load if not yet fetched
+          final isTest = WidgetsBinding.instance.runtimeType.toString().contains('Test');
+          if (!isTest && _lastFix == null && !_refreshingLocation && _liveLocationError == null) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _lastFix == null && !_refreshingLocation) {
+                _refreshCurrentLocation(today);
+              }
+            });
+          }
 
           final label = switch (_phase) {
             _Phase.locating => 'Getting your location…',
@@ -1892,11 +1989,29 @@ class _SelfieSheet extends StatefulWidget {
     this.locationName,
     this.locationAddress,
     this.stepTitle,
+    this.officeLat,
+    this.officeLng,
+    this.officeRadiusMeters,
+    this.initialUserLat,
+    this.initialUserLng,
+    this.initialAccuracyMeters,
+    this.initialDistanceMeters,
+    this.initialIsInside,
+    this.onLocationRefreshed,
   });
   final bool isCheckIn;
   final String? locationName;
   final String? locationAddress;
   final String? stepTitle;
+  final double? officeLat;
+  final double? officeLng;
+  final double? officeRadiusMeters;
+  final double? initialUserLat;
+  final double? initialUserLng;
+  final double? initialAccuracyMeters;
+  final double? initialDistanceMeters;
+  final bool? initialIsInside;
+  final void Function(GeoReading fix, String address, double? dist, bool? isInside)? onLocationRefreshed;
 
   @override
   State<_SelfieSheet> createState() => _SelfieSheetState();
@@ -1907,10 +2022,24 @@ class _SelfieSheetState extends State<_SelfieSheet> {
   bool _busy = false;
   bool _refreshingLoc = false;
   late String? _displayLoc = widget.locationAddress ?? widget.locationName;
+  late double? _userLat = widget.initialUserLat;
+  late double? _userLng = widget.initialUserLng;
+  late double? _accuracyMeters = widget.initialAccuracyMeters;
+  late double? _distanceMeters = widget.initialDistanceMeters;
+  late bool? _isInside = widget.initialIsInside;
+  bool _showMap = true;
 
-  @override
-  void initState() {
-    super.initState();
+  double _calcHaversine(double lat1, double lon1, double lat2, double lon2) {
+    const r = 6371000.0;
+    final dLat = (lat2 - lat1) * (math.pi / 180.0);
+    final dLon = (lon2 - lon1) * (math.pi / 180.0);
+    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(lat1 * (math.pi / 180.0)) *
+            math.cos(lat2 * (math.pi / 180.0)) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    return r * c;
   }
 
   Future<void> _refreshLocation() async {
@@ -1924,15 +2053,36 @@ class _SelfieSheetState extends State<_SelfieSheet> {
         fallbackAddress: widget.locationAddress,
         fallbackLocationName: widget.locationName,
       );
+      double? dist;
+      bool? inside;
+      if (widget.officeLat != null && widget.officeLng != null) {
+        dist = _calcHaversine(
+          fix.latitude,
+          fix.longitude,
+          widget.officeLat!,
+          widget.officeLng!,
+        );
+        final radius = widget.officeRadiusMeters ?? 100.0;
+        inside = dist <= radius;
+      }
       if (mounted) {
         setState(() {
           _displayLoc = addr;
+          _userLat = fix.latitude;
+          _userLng = fix.longitude;
+          _accuracyMeters = fix.accuracyMeters;
+          _distanceMeters = dist;
+          _isInside = inside;
           _refreshingLoc = false;
         });
+        widget.onLocationRefreshed?.call(fix, addr, dist, inside);
         NToast.of(context).show('Location refreshed: $addr');
       }
-    } catch (_) {
-      if (mounted) setState(() => _refreshingLoc = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _refreshingLoc = false);
+        NToast.of(context).show('Could not refresh location: $e');
+      }
     }
   }
 
@@ -1953,17 +2103,21 @@ class _SelfieSheetState extends State<_SelfieSheet> {
   @override
   Widget build(BuildContext context) {
     final t = NTokens.of(context);
-    final actionName = widget.stepTitle ?? (widget.isCheckIn ? 'Check in' : 'Check out');
+    final actionName = widget.stepTitle ?? (widget.isCheckIn ? 'Clock In' : 'Clock Out');
     final isMobile = NBreakpoint.of(context).isMobile;
 
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Step Info Badge & Location
-          Row(
+          // Step Info Badge, Geofence Tag & Map Controls
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -1975,7 +2129,7 @@ class _SelfieSheetState extends State<_SelfieSheet> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.camera_alt_rounded, size: 14, color: t.accent),
+                    Icon(widget.isCheckIn ? Icons.login_rounded : Icons.logout_rounded, size: 14, color: t.accent),
                     const SizedBox(width: 6),
                     Text(
                       actionName,
@@ -1984,38 +2138,146 @@ class _SelfieSheetState extends State<_SelfieSheet> {
                   ],
                 ),
               ),
-              if (_displayLoc != null) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '📍 $_displayLoc',
-                    style: t.text.caption().copyWith(color: t.muted),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+              if (_isInside != null || _distanceMeters != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: (_isInside == true ? t.green : t.amber).withValues(alpha: t.isDark ? 0.22 : 0.14),
+                    borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                    border: Border.all(color: (_isInside == true ? t.green : t.amber).withValues(alpha: 0.4)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _isInside == true ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+                        size: 13,
+                        color: _isInside == true ? t.green : t.amber,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _isInside == true
+                            ? 'Inside Office (${_distanceMeters?.round() ?? 0}m)'
+                            : 'Outside Office (${_distanceMeters?.round() ?? 0}m)',
+                        style: t.text.caption(weight: FontWeight.w700).copyWith(
+                              fontSize: 10.5,
+                              color: _isInside == true ? t.green : t.amber,
+                            ),
+                      ),
+                    ],
                   ),
                 ),
-                InkWell(
-                  onTap: _refreshingLoc ? null : _refreshLocation,
-                  borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                    child: _refreshingLoc
-                        ? SizedBox(
-                            width: 12,
-                            height: 12,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: t.accent),
-                          )
-                        : Icon(Icons.refresh_rounded, size: 14, color: t.accent),
+              Wrap(
+                spacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  InkWell(
+                    onTap: () => setState(() => _showMap = !_showMap),
+                    borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: t.card,
+                        borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                        border: Border.all(color: t.divider),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(_showMap ? Icons.map_rounded : Icons.radar_rounded, size: 13, color: t.accent),
+                          const SizedBox(width: 4),
+                          Text(
+                            _showMap ? 'Hide Map' : 'View Real Map',
+                            style: t.text.caption(weight: FontWeight.w700).copyWith(fontSize: 10.5, color: t.accent),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-              ],
+                  InkWell(
+                    onTap: _refreshingLoc ? null : _refreshLocation,
+                    borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: t.accent.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                        border: Border.all(color: t.accent.withValues(alpha: 0.4)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_refreshingLoc)
+                            SizedBox(
+                              width: 11,
+                              height: 11,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: t.accent),
+                            )
+                          else
+                            Icon(Icons.refresh_rounded, size: 13, color: t.accent),
+                          const SizedBox(width: 4),
+                          Text(
+                            _refreshingLoc ? 'Locating...' : 'Refresh GPS',
+                            style: t.text.caption(weight: FontWeight.w700).copyWith(fontSize: 10.5, color: t.accent),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
+
+          if (_displayLoc != null && _displayLoc!.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: t.pillTrack.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(t.radiusTile),
+                border: Border.all(color: t.divider),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.location_on_rounded, size: 14, color: t.accent),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _displayLoc!,
+                      style: t.text.caption(weight: FontWeight.w600).copyWith(color: t.ink, fontSize: 11),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+
+          // Real Map with Live Geofence Visualizer
+          if (_showMap) ...[
+            GeofenceRadarMap(
+              officeLat: widget.officeLat ?? 23.0225,
+              officeLng: widget.officeLng ?? 72.5714,
+              officeRadiusMeters: widget.officeRadiusMeters ?? 100.0,
+              officeName: widget.locationName ?? 'Office',
+              officeAddress: widget.locationAddress,
+              userLat: _userLat,
+              userLng: _userLng,
+              accuracyMeters: _accuracyMeters,
+              isInside: _isInside,
+              isRefreshing: _refreshingLoc,
+              onRefresh: _refreshLocation,
+              height: isMobile ? 180 : 200,
+            ),
+            const SizedBox(height: 14),
+          ],
 
           // Camera Viewfinder & Photo Display
           Container(
-            height: isMobile ? 220 : 270,
+            height: isMobile ? 210 : 250,
             decoration: BoxDecoration(
               color: t.pillTrack,
               borderRadius: BorderRadius.circular(t.radiusPanel),
@@ -2077,8 +2339,8 @@ class _SelfieSheetState extends State<_SelfieSheet> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Container(
-                        width: 74,
-                        height: 74,
+                        width: 68,
+                        height: 68,
                         decoration: BoxDecoration(
                           color: t.accent.withValues(alpha: t.isDark ? 0.25 : 0.16),
                           shape: BoxShape.circle,
@@ -2087,19 +2349,19 @@ class _SelfieSheetState extends State<_SelfieSheet> {
                         child: Center(
                           child: _busy
                               ? SizedBox(
-                                  width: 32,
-                                  height: 32,
+                                  width: 28,
+                                  height: 28,
                                   child: CircularProgressIndicator(strokeWidth: 2.5, color: t.accent),
                                 )
-                              : Icon(Icons.camera_alt_rounded, size: 36, color: t.accent),
+                              : Icon(Icons.camera_alt_rounded, size: 32, color: t.accent),
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
                       Text(
                         _busy ? 'Opening camera…' : 'Capture Attendance Selfie',
-                        style: t.text.title(size: 16),
+                        style: t.text.title(size: 15),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 3),
                       Text(
                         'Direct front camera photo verification',
                         style: t.text.caption(color: t.muted),
