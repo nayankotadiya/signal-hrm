@@ -89,9 +89,9 @@ class _NKanbanState<T extends Object> extends State<NKanban<T>> {
         duration: t.durations.hover,
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: hovering ? t.accent.withValues(alpha: 0.10) : t.pillTrack.withValues(alpha: 0.6),
+          color: hovering ? t.accent.withValues(alpha: 0.10) : (t.isDark ? const Color(0xFF1B202D) : t.pillTrack),
           borderRadius: BorderRadius.circular(t.radiusCard),
-          border: Border.all(color: hovering ? t.accent : Colors.transparent, width: 1.5),
+          border: Border.all(color: hovering ? t.accent : (t.isDark ? const Color(0xFF2C3345) : Colors.transparent), width: 1.5),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
           Padding(

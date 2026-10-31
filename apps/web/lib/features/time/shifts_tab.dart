@@ -86,13 +86,24 @@ class _ShiftsTabState extends State<ShiftsTab> {
                           margin: const EdgeInsets.symmetric(horizontal: 2),
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
-                            color: cell['shiftId'] == null ? t.pillTrack.withValues(alpha: 0.4) : (cell['color'] != null ? _hex('${cell['color']}').withValues(alpha: 0.35) : t.accent.withValues(alpha: 0.18)),
+                            color: cell['shiftId'] == null
+                                ? (t.isDark ? const Color(0xFF1E2332) : const Color(0xFFF1F5F9))
+                                : (cell['color'] != null ? _hex('${cell['color']}').withValues(alpha: 0.35) : t.accent.withValues(alpha: 0.18)),
                             borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: t.isDark ? const Color(0xFF2C3345) : t.divider),
                           ),
                           child: Semantics(
                             label: cell['shiftId'] == null ? 'Off' : '${cell['name']} ${cell['start']} to ${cell['end']}',
                             excludeSemantics: true,
-                            child: Text(cell['shiftId'] == null ? 'Off' : '${cell['start']}\n${cell['end']}${cell['overnight'] == true ? ' +1' : ''}', textAlign: TextAlign.center, style: t.text.caption(color: t.ink, size: 10)),
+                            child: Text(
+                              cell['shiftId'] == null ? 'Off' : '${cell['start']}\n${cell['end']}${cell['overnight'] == true ? ' +1' : ''}',
+                              textAlign: TextAlign.center,
+                              style: t.text.caption(
+                                color: cell['shiftId'] == null ? (t.isDark ? const Color(0xFF98A0B6) : t.muted) : t.ink,
+                                size: 10,
+                                weight: cell['shiftId'] == null ? FontWeight.w400 : FontWeight.w600,
+                              ),
+                            ),
                           ),
                         ),
                     ]),

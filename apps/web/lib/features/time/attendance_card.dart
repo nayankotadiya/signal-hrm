@@ -1107,17 +1107,18 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: t.pillTrack.withValues(alpha: 0.6),
+                color: t.isDark ? const Color(0xFF1E2433) : const Color(0xFFF1F4F9),
                 borderRadius: BorderRadius.circular(t.radiusCard),
+                border: Border.all(color: t.isDark ? const Color(0xFF2C3345) : t.divider),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.schedule_rounded, size: 16, color: t.muted),
+                  Icon(Icons.schedule_rounded, size: 16, color: t.accent),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       '$shiftName ($shiftHours)',
-                      style: t.text.caption().copyWith(color: t.ink),
+                      style: t.text.caption(weight: FontWeight.w600).copyWith(color: t.ink),
                     ),
                   ),
                   Text(
@@ -1261,7 +1262,7 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
             timing: '1:00 PM – 2:00 PM',
             duration: breakMins > 0 ? '${Fmt.minutes(breakMins)} taken' : '1 hr auto-break',
             status: breakMins > 0 ? '${Fmt.minutes(breakMins)} Break' : (hasCheckedOut ? 'Deducted' : '1 hr'),
-            color: t.muted,
+            color: t.amber,
             isCurrent: false,
             isBreak: true,
           ),
@@ -1407,18 +1408,30 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
     required bool isCurrent,
     bool isBreak = false,
   }) {
+    final itemBg = isBreak
+        ? (t.isDark ? const Color(0xFF171B26) : const Color(0xFFF3F5F8))
+        : (isCurrent
+            ? color.withValues(alpha: t.isDark ? 0.14 : 0.08)
+            : (t.isDark ? const Color(0xFF1B202D) : t.pillTrack));
+
+    final itemBorder = isCurrent
+        ? color.withValues(alpha: 0.5)
+        : (isBreak
+            ? (t.isDark ? const Color(0xFF2C3345) : const Color(0xFFE2E8F0))
+            : (t.isDark ? const Color(0xFF262D3D) : t.divider));
+
+    final subColor = t.isDark ? const Color(0xFFB4BDD0) : t.muted;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: isBreak ? t.pillTrack.withValues(alpha: 0.6) : (isCurrent ? color.withValues(alpha: 0.08) : t.pillTrack),
+        color: itemBg,
         borderRadius: BorderRadius.circular(t.radiusTile),
-        border: Border.all(
-          color: isCurrent ? color.withValues(alpha: 0.5) : t.divider,
-        ),
+        border: Border.all(color: itemBorder),
       ),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: color),
+          Icon(icon, size: 16, color: isBreak ? (t.isDark ? const Color(0xFFE5A855) : const Color(0xFFD97706)) : color),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -1429,28 +1442,46 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text(title, style: t.text.caption(weight: FontWeight.w700).copyWith(color: t.ink)),
-                    Text('($duration)', style: t.text.caption().copyWith(fontSize: 10, color: t.muted)),
+                    Text('($duration)', style: t.text.caption().copyWith(fontSize: 10, color: subColor)),
                   ],
                 ),
                 const SizedBox(height: 1),
-                Text(timing, style: t.text.caption().copyWith(fontSize: 11, color: t.muted)),
+                Text(timing, style: t.text.caption().copyWith(fontSize: 11, color: subColor)),
               ],
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: (status == 'Active' || status == 'In Progress' ? t.accent : (status == 'Done' || status == 'Completed' ? t.green : t.card))
-                  .withValues(alpha: t.isDark ? 0.22 : 0.16),
+              color: isBreak
+                  ? (t.isDark ? const Color(0xFF242A3A) : const Color(0xFFE2E8F0))
+                  : (status == 'Active' || status == 'In Progress'
+                      ? t.accent.withValues(alpha: 0.20)
+                      : (status == 'Done' || status == 'Completed'
+                          ? t.green.withValues(alpha: 0.20)
+                          : (t.isDark ? const Color(0xFF242A3A) : const Color(0xFFE2E8F0)))),
               borderRadius: BorderRadius.circular(NTokens.radiusPill),
+              border: Border.all(
+                color: isBreak
+                    ? (t.isDark ? const Color(0xFF384055) : const Color(0xFFCBD5E1))
+                    : (status == 'Active' || status == 'In Progress'
+                        ? t.accent.withValues(alpha: 0.45)
+                        : (status == 'Done' || status == 'Completed'
+                            ? t.green.withValues(alpha: 0.45)
+                            : (t.isDark ? const Color(0xFF384055) : t.divider))),
+              ),
             ),
             child: Text(
               status,
-              style: t.text.caption(weight: FontWeight.w600).copyWith(
+              style: t.text.caption(weight: FontWeight.w700).copyWith(
                     fontSize: 10,
-                    color: status == 'Active' || status == 'In Progress'
-                        ? t.accent
-                        : (status == 'Done' || status == 'Completed' ? t.green : t.muted),
+                    color: isBreak
+                        ? (t.isDark ? const Color(0xFFBAC2D6) : const Color(0xFF475569))
+                        : (status == 'Active' || status == 'In Progress'
+                            ? t.accent
+                            : (status == 'Done' || status == 'Completed'
+                                ? t.green
+                                : (t.isDark ? const Color(0xFFBAC2D6) : t.muted))),
                   ),
             ),
           ),
@@ -1569,9 +1600,9 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                   margin: const EdgeInsets.symmetric(vertical: 8),
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: t.pillTrack.withValues(alpha: 0.5),
+                    color: t.isDark ? const Color(0xFF1B202D) : const Color(0xFFF8FAFC),
                     borderRadius: BorderRadius.circular(t.radiusCard),
-                    border: Border.all(color: t.cardBorder),
+                    border: Border.all(color: t.isDark ? const Color(0xFF2C3345) : t.divider),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1597,26 +1628,34 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                             ],
                           ),
                           Wrap(
-                            spacing: 4,
-                            runSpacing: 2,
+                            spacing: 6,
+                            runSpacing: 4,
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
                               InkWell(
                                 onTap: () => setState(() => _showGeofenceMap = !_showGeofenceMap),
                                 borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                  decoration: BoxDecoration(
+                                    color: t.accent.withValues(alpha: t.isDark ? 0.16 : 0.08),
+                                    borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                                    border: Border.all(color: t.accent.withValues(alpha: 0.35)),
+                                  ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(_showGeofenceMap ? Icons.map_rounded : Icons.radar_rounded, size: 14, color: t.accent),
+                                      Icon(_showGeofenceMap ? Icons.map_rounded : Icons.radar_rounded, size: 13, color: t.accent),
                                       const SizedBox(width: 4),
-                                      Text(
-                                        _showGeofenceMap ? 'Hide Map' : 'View Map',
-                                        style: t.text.caption(weight: FontWeight.w700).copyWith(
-                                              color: t.accent,
-                                              fontSize: 11,
-                                            ),
+                                      Flexible(
+                                        child: Text(
+                                          _showGeofenceMap ? 'Hide Map' : 'View Map',
+                                          style: t.text.caption(weight: FontWeight.w700).copyWith(
+                                                color: t.accent,
+                                                fontSize: 11,
+                                              ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -1625,8 +1664,13 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                               InkWell(
                                 onTap: _refreshingLocation ? null : () => _refreshCurrentLocation(today),
                                 borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                  decoration: BoxDecoration(
+                                    color: t.accent.withValues(alpha: t.isDark ? 0.16 : 0.08),
+                                    borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                                    border: Border.all(color: t.accent.withValues(alpha: 0.35)),
+                                  ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
@@ -1637,14 +1681,17 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                                           child: CircularProgressIndicator(strokeWidth: 2, color: t.accent),
                                         )
                                       else
-                                        Icon(Icons.refresh_rounded, size: 14, color: t.accent),
+                                        Icon(Icons.refresh_rounded, size: 13, color: t.accent),
                                       const SizedBox(width: 4),
-                                      Text(
-                                        _refreshingLocation ? 'Refreshing...' : 'Refresh GPS',
-                                        style: t.text.caption(weight: FontWeight.w700).copyWith(
-                                              color: t.accent,
-                                              fontSize: 11,
-                                            ),
+                                      Flexible(
+                                        child: Text(
+                                          _refreshingLocation ? 'Refreshing...' : 'Refresh GPS',
+                                          style: t.text.caption(weight: FontWeight.w700).copyWith(
+                                                color: t.accent,
+                                                fontSize: 11,
+                                              ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -1653,19 +1700,27 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                               InkWell(
                                 onTap: () => _openSetOfficeLocation(loc, today),
                                 borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                  decoration: BoxDecoration(
+                                    color: t.accent.withValues(alpha: t.isDark ? 0.16 : 0.08),
+                                    borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                                    border: Border.all(color: t.accent.withValues(alpha: 0.35)),
+                                  ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(Icons.edit_location_alt_outlined, size: 14, color: t.accent),
+                                      Icon(Icons.edit_location_alt_outlined, size: 13, color: t.accent),
                                       const SizedBox(width: 4),
-                                      Text(
-                                        'Set Office',
-                                        style: t.text.caption(weight: FontWeight.w700).copyWith(
-                                              color: t.accent,
-                                              fontSize: 11,
-                                            ),
+                                      Flexible(
+                                        child: Text(
+                                          'Set Office',
+                                          style: t.text.caption(weight: FontWeight.w700).copyWith(
+                                                color: t.accent,
+                                                fontSize: 11,
+                                              ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -1677,19 +1732,27 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                                   onPermissionsChanged: () => _refreshCurrentLocation(today),
                                 ),
                                 borderRadius: BorderRadius.circular(NTokens.radiusPill),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                  decoration: BoxDecoration(
+                                    color: t.accent.withValues(alpha: t.isDark ? 0.16 : 0.08),
+                                    borderRadius: BorderRadius.circular(NTokens.radiusPill),
+                                    border: Border.all(color: t.accent.withValues(alpha: 0.35)),
+                                  ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(Icons.verified_user_outlined, size: 14, color: t.accent),
+                                      Icon(Icons.verified_user_outlined, size: 13, color: t.accent),
                                       const SizedBox(width: 4),
-                                      Text(
-                                        'Permissions',
-                                        style: t.text.caption(weight: FontWeight.w700).copyWith(
-                                              color: t.accent,
-                                              fontSize: 11,
-                                            ),
+                                      Flexible(
+                                        child: Text(
+                                          'Permissions',
+                                          style: t.text.caption(weight: FontWeight.w700).copyWith(
+                                                color: t.accent,
+                                                fontSize: 11,
+                                              ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -1706,7 +1769,10 @@ class _AttendanceTodayCardState extends State<AttendanceTodayCard> {
                             : (loc['address'] != null && (loc['address'] as String).isNotEmpty
                                 ? '${loc['name']} · ${loc['address']} (allowed radius ${loc['radiusMeters'] ?? 100} m)'
                                 : '${loc['name']} (allowed radius ${loc['radiusMeters'] ?? 100} m)'),
-                        style: t.text.caption(color: t.muted),
+                        style: t.text.caption(weight: FontWeight.w500).copyWith(
+                              color: t.isDark ? const Color(0xFFB4BDD0) : const Color(0xFF475569),
+                              fontSize: 11.5,
+                            ),
                       ),
                       if (_lastFix != null || _liveAddress != null) ...[
                         const SizedBox(height: 8),
@@ -2234,9 +2300,9 @@ class _SelfieSheetState extends State<_SelfieSheet> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: t.pillTrack.withValues(alpha: 0.5),
+                color: t.isDark ? const Color(0xFF1E2433) : const Color(0xFFF1F5F9),
                 borderRadius: BorderRadius.circular(t.radiusTile),
-                border: Border.all(color: t.divider),
+                border: Border.all(color: t.isDark ? const Color(0xFF2C3345) : t.divider),
               ),
               child: Row(
                 children: [

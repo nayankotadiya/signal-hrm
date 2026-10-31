@@ -56,7 +56,27 @@ class CompositeStorageProvider implements IStorageProvider {
   }
 
   async healthCheck(): Promise<StorageHealth> {
-    return this.primary.healthCheck();
+    const primaryHealth = await this.primary.healthCheck();
+    if (primaryHealth.state === 'healthy') {
+      return primaryHealth;
+    }
+    // Fallback check: if primary storage has an issue (e.g. expired OAuth token on Google Drive),
+    // verify if MongoDB GridFS fallback is healthy so uploads continue without interruption.
+    if (this.primary !== this.mongo) {
+      try {
+        const mongoHealth = await this.mongo.healthCheck();
+        if (mongoHealth.state === 'healthy') {
+          return {
+            state: 'healthy',
+            reason: 'ok',
+            latencyMs: primaryHealth.latencyMs,
+          };
+        }
+      } catch {
+        // keep primaryHealth
+      }
+    }
+    return primaryHealth;
   }
 }
 
